@@ -1,0 +1,122 @@
+:root {
+  color-scheme: light;
+
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --text-body: 15px;
+  --text-label: 13px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --radius-sm: 10px;
+  --radius-lg: 16px;
+
+  --bg: #f7f5fb;
+  --surface: #ffffff;
+  --surface-subtle: #fbfaff;
+  --text: #202124;
+  --muted: #6b6675;
+  --border: #e6e1ee;
+  --accent: #6d28d9;
+  --accent-muted: #f0eafd;
+  --chart-2: #8b5cf6;
+  --chart-3: #a78bfa;
+  --chart-4: #c4b5fd;
+  --chart-5: #ddd6fe;
+  --chart-emerald: #10b981;
+  --chart-amber: #f59e0b;
+  --chart-rose: #ef4444;
+  --chart-sky: #3b82f6;
+  --success-bg: #ecfdf5;
+  --success-text: #065f46;
+  --warning-bg: #fffbeb;
+  --warning-text: #92400e;
+  --danger-bg: #fff6f6;
+  --danger-text: #9f1d1d;
+  --neutral-bg: #f3f4f6;
+  --neutral-text: #374151;
+  --hairline-shadow: 0 1px 2px rgba(32, 33, 36, 0.04);
+  --card-shadow: 0 2px 8px rgba(109, 40, 217, 0.06), 0 1px 2px rgba(32, 33, 36, 0.04);
+
+  font-family: var(--font-family);
+  font-size: var(--text-body);
+  font-synthesis: none;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  scroll-behavior: smooth;
+  background: var(--bg);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+  font-family: var(--font-family);
+  font-size: var(--text-body);
+  font-weight: var(--weight-regular);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+  font-size: var(--text-body);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-family: var(--font-family);
+  font-size: var(--text-label);
+}
