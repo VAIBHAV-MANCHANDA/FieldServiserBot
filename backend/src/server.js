@@ -6,7 +6,7 @@ try {
   const validation = validateEnv()
 
   if (!validation.geminiConfigured) {
-    logger.warn('GEMINI_API_KEY is missing. Chat queries will return a configuration error.')
+    logger.warn('GEMINI_API_KEY is missing. Chat queries will use the closest safe API-backed fallback.')
   }
 
   if (!validation.fieldServicerConfigured) {

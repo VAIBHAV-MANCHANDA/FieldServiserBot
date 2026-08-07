@@ -11,6 +11,8 @@ class FieldServicerClient {
     this.accessToken = null
     this.refreshToken = null
     this.tokenExpiry = null
+    this.loginPromise = null
+    this.rosterCache = new Map()
 
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -46,8 +48,11 @@ class FieldServicerClient {
       async (error) => {
         const originalRequest = error.config
 
+        // Never retry the login request itself; invalid credentials must fail once.
+        const isLoginRequest = originalRequest?.url?.includes('/Auth/Login')
+
         // If 401 and we haven't retried yet, try to refresh token
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        if (error.response?.status === 401 && !isLoginRequest && !originalRequest?._retry) {
           originalRequest._retry = true
 
           try {
@@ -68,6 +73,18 @@ class FieldServicerClient {
    * Login to FieldServicer API
    */
   async login() {
+    if (this.loginPromise) return this.loginPromise
+
+    this.loginPromise = this.performLogin()
+
+    try {
+      return await this.loginPromise
+    } finally {
+      this.loginPromise = null
+    }
+  }
+
+  async performLogin() {
     try {
       const response = await this.client.post('/Auth/Login', {
         Username: this.username,
@@ -76,23 +93,31 @@ class FieldServicerClient {
         ForLMS: false,
       })
 
-      if (response.data?.AccessToken) {
-        this.accessToken = response.data.AccessToken
-        this.refreshToken = response.data.RefreshToken
+      const accessToken = response.data?.access_token ?? response.data?.AccessToken
+      const refreshToken = response.data?.refresh_token ?? response.data?.RefreshToken ?? null
+
+      if (accessToken) {
+        this.accessToken = accessToken
+        this.refreshToken = refreshToken
         
         // Decode JWT to get expiry (basic parsing)
         if (this.accessToken) {
           try {
             const payload = JSON.parse(Buffer.from(this.accessToken.split('.')[1], 'base64').toString())
-            this.tokenExpiry = payload.exp ? payload.exp * 1000 : Date.now() + 15 * 60 * 1000 // Default 15 min
+            this.tokenExpiry = payload.exp
+              ? payload.exp * 1000
+              : Date.now() + Number(response.data?.expires_in ?? 900) * 1000
           } catch {
-            // If parsing fails, set expiry to 15 minutes from now
-            this.tokenExpiry = Date.now() + 15 * 60 * 1000
+            this.tokenExpiry = Date.now() + Number(response.data?.expires_in ?? 900) * 1000
           }
         }
 
         logger.info('FieldServicer API authentication successful')
-        return response.data
+        return {
+          ...response.data,
+          AccessToken: accessToken,
+          RefreshToken: refreshToken,
+        }
       }
 
       throw new Error('No access token received from login')
@@ -119,9 +144,19 @@ class FieldServicerClient {
    * Get roster/shift list
    * Returns a flat array of shift objects.
    */
-  async getRosterShiftList({ locationId = 0, clientId = 0, fromDate, toDate }) {
-    try {
-      const response = await this.client.get('/Shift/RosterShiftList', {
+  async getRosterShiftList({ locationId = 0, clientId = 0, fromDate, toDate, forceRefresh = false }) {
+    const cacheKey = `${locationId}:${clientId}:${fromDate}:${toDate}`
+    const cached = this.rosterCache.get(cacheKey)
+
+    if (!forceRefresh && cached?.data && cached.expiresAt > Date.now()) {
+      return cached.data
+    }
+
+    if (!forceRefresh && cached?.promise) {
+      return cached.promise
+    }
+
+    const request = this.client.get('/Shift/RosterShiftList', {
         params: {
           LocationID: locationId,
           ClientID: clientId,
@@ -129,20 +164,31 @@ class FieldServicerClient {
           ToDate: toDate,
         },
       })
+      .then((response) => {
+        const payload = response.data
+        const data = Array.isArray(payload) ? payload : payload?.Data ?? payload?.Items ?? payload?.Result ?? []
 
-      // API returns a plain array directly
-      const data = response.data
-      return Array.isArray(data) ? data : data?.Data ?? data?.Items ?? data?.Result ?? []
-    } catch (error) {
-      logger.error('Failed to fetch roster shift list', {
-        error: error.message,
-        locationId,
-        clientId,
-        fromDate,
-        toDate,
+        this.rosterCache.set(cacheKey, {
+          data,
+          expiresAt: Date.now() + env.fieldServicerCacheTtlMs,
+        })
+
+        return data
       })
-      throw error
-    }
+      .catch((error) => {
+        this.rosterCache.delete(cacheKey)
+        logger.error('Failed to fetch roster shift list', {
+          error: error.message,
+          locationId,
+          clientId,
+          fromDate,
+          toDate,
+        })
+        throw error
+      })
+
+    this.rosterCache.set(cacheKey, { promise: request })
+    return request
   }
 
   /**

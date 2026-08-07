@@ -16,7 +16,7 @@ Chat sessions are held in backend memory for the lifetime of the running process
 
 - Node.js 20+
 - FieldServicer API credentials
-- Gemini API key for questions that cannot be resolved by deterministic intent rules
+- Gemini API key for natural-language tool selection and grounded answers
 
 ## Backend setup
 
@@ -38,9 +38,11 @@ FIELDSERVICER_API_URL=https://app.fieldservicer.com/api
 FIELDSERVICER_USERNAME=your-email@example.com
 FIELDSERVICER_PASSWORD=your-password
 FIELDSERVICER_FOR_PORTAL=true
+FIELDSERVICER_CACHE_TTL_MS=30000
 
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.5-flash
+GEMINI_FALLBACK_MODEL=gemini-3.5-flash-lite
 
 MAX_REPORT_DATE_RANGE_DAYS=366
 MAX_REPORT_ROWS=100
@@ -74,6 +76,7 @@ VITE_API_BASE_URL=http://localhost:5000/api
 - `GET /api/chat/sessions/:sessionId`
 - `DELETE /api/chat/sessions/:sessionId`
 - `GET /api/reports/types`
+- `GET /api/reports/dashboard?days=30`
 - `POST /api/reports/generate`
 
 ## FieldServicer endpoints currently used
@@ -83,15 +86,18 @@ VITE_API_BASE_URL=http://localhost:5000/api
 
 The roster endpoint accepts `LocationID`, `ClientID`, `FromDate`, and `ToDate`. Its response is normalized into a stable internal shift shape before reports are calculated.
 
+The dashboard endpoint accepts `days=7`, `days=30`, or `days=90`. It makes one roster request covering the selected and previous comparison periods, then derives every dashboard KPI, chart, employee comparison, site comparison, live roster item, and operational-risk indicator in memory. Identical roster requests are cached briefly and concurrent duplicates share the same in-flight request.
+
 ## Query workflow
 
 1. The frontend posts a workforce question to `/api/chat/query`.
-2. The backend rejects unrelated questions and loads recent conversation context.
-3. Deterministic rules or Gemini produce a structured report intent.
-4. Joi validates the report type, metrics, grouping, filters, dates, sorting, chart type, and row limit.
-5. The backend requests live records from FieldServicer.
+2. The backend gives Gemini a fixed catalog of API-backed workforce functions.
+3. Gemini corrects obvious typos, interprets follow-ups, and selects one function with structured arguments.
+4. Joi and tool-specific allowlists validate every date, filter, metric, grouping, status ID, sort field, and result limit.
+5. The selected backend function requests live records from FieldServicer; Gemini cannot supply an endpoint or execute arbitrary code.
 6. Records are normalized, filtered, grouped, and aggregated in memory.
-7. The response includes summary cards, line/pie/bar charts, a table, and a concise explanation.
+7. The function result is returned to Gemini, which produces an answer grounded strictly in the returned rows.
+8. Low-confidence selections, fallbacks, and empty results are emitted as structured `query_miss` logs for review.
 
 ## Example questions
 
@@ -109,13 +115,19 @@ Follow-ups can reuse the previous intent:
 - Show the top five only.
 - Convert this into a line graph.
 
-## Adding FieldServicer endpoints
+## Adding a Gemini workforce tool
 
-Add endpoint metadata to `backend/src/services/api/apiRegistry.js`, including its method, path, parameters, keywords, and authentication requirement. Add or update normalization and report logic when the endpoint returns a new data shape. See `HOW_TO_ADD_NEW_APIS.md` for examples.
+1. Add a function declaration to `backend/src/tools/workforce.tools.js`. Give it a distinct name, a precise description, and only the arguments the backend supports.
+2. Add its fixed mapping and argument allowlists to `backend/src/services/ai/workforceTool.service.js`.
+3. Implement or register the corresponding repository method. All external access must remain inside the authenticated FieldServicer client.
+4. Add the report definition and real API-supported metrics to `backend/src/services/reports/reportRegistry.js`.
+5. Add tests for correct selection, malformed arguments, empty results, and ambiguous wording.
+
+Do not add keyword lists, raw URLs supplied by Gemini, SQL generation, or values that are not present in the FieldServicer response. See `HOW_TO_ADD_NEW_APIS.md` for the complete workflow.
 
 ## Troubleshooting
 
 - If `/api/health/fieldservicer` fails, verify the FieldServicer URL, credentials, portal flag, and network access.
-- If a chat request returns `GEMINI_NOT_CONFIGURED`, add `GEMINI_API_KEY` or use a question supported by deterministic intent rules.
+- If Gemini is unavailable, the backend returns the closest safe API-backed fallback and records a `query_miss`; configure `GEMINI_API_KEY` for intelligent routing.
 - If the frontend cannot reach the backend, confirm `VITE_API_BASE_URL=http://localhost:5000/api`.
 - Check backend logs for authentication, routing, normalization, and upstream API errors.

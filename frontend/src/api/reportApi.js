@@ -42,3 +42,10 @@ export async function fetchReportTypes() {
   const response = await axiosClient.get('/reports/types')
   return response.data.reportTypes
 }
+
+export async function fetchDashboard({ days = 30, refresh = false } = {}) {
+  const response = await axiosClient.get('/reports/dashboard', {
+    params: { days, ...(refresh ? { refresh: true } : {}) },
+  })
+  return response.data.dashboard
+}

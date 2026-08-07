@@ -2,13 +2,7 @@ const FORMAT_BY_METRIC = {
   actual_hours: 'hours',
   completion_rate: 'percentage',
   fill_rate: 'percentage',
-  gross_margin_percentage: 'percentage',
-  gross_profit: 'currency',
-  late_minutes: 'minutes',
-  overtime_hours: 'hours',
-  revenue: 'currency',
   rostered_hours: 'hours',
-  wages: 'currency',
 }
 
 const LABELS = {
@@ -16,21 +10,13 @@ const LABELS = {
   cancelled_count: 'Cancelled',
   completed_count: 'Completed',
   completion_rate: 'Completion Rate',
-  early_leave_minutes: 'Early Leave',
   employee_count: 'Employees',
   fill_rate: 'Fill Rate',
-  gross_margin_percentage: 'Gross Margin',
-  gross_profit: 'Gross Profit',
-  late_count: 'Late Count',
-  late_minutes: 'Late Minutes',
   missed_count: 'Missed',
-  overtime_hours: 'Overtime Hours',
   record_count: 'Records',
-  revenue: 'Revenue',
   rostered_hours: 'Rostered Hours',
   shift_count: 'Shifts',
   unfilled_count: 'Unfilled',
-  wages: 'Wages',
 }
 
 function getXAxisKey(intent, groupKey) {

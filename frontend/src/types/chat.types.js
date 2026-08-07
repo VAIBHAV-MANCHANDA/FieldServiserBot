@@ -7,8 +7,8 @@ export const CHAT_MESSAGE_ROLES = {
 export const STARTER_QUESTIONS = [
   'Show completed and missed shifts this month.',
   'Create a graph of actual hours by employee.',
-  'Which employees were late most frequently?',
-  'Show revenue, wages and gross profit by month.',
+  'Compare employee shifts for this week.',
+  'Show customers with the most shifts this month.',
   'Which site has the most missed shifts?',
   'Show currently clocked-in employees.',
   'Compare rostered and actual hours.',

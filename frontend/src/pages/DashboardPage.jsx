@@ -1,111 +1,132 @@
-import { useCallback, useEffect, useReducer } from 'react'
-import { executeReport } from '../api/reportApi.js'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { fetchDashboard } from '../api/reportApi.js'
 import DynamicChart from '../components/charts/DynamicChart.jsx'
 import ErrorMessage from '../components/common/ErrorMessage.jsx'
-import Loader from '../components/common/Loader.jsx'
-import StatCard from '../components/dashboard/StatCard.jsx'
 
-// ─── Today / date-range helpers ───────────────────────────────────────────────
-function todayISO() {
-  return new Date().toISOString().slice(0, 10)
-}
-function daysAgoISO(n) {
-  const d = new Date()
-  d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
-}
+const PERIODS = [
+  { days: 7, label: '7 days' },
+  { days: 30, label: '30 days' },
+  { days: 90, label: '90 days' },
+]
 
-// ─── Reducer ─────────────────────────────────────────────────────────────────
-const INITIAL_STATE = {
-  attendanceChart: null,
-  currentlyIn: null,
-  error: null,
-  financialChart: null,
-  kpi: null,
-  loading: true,
-  missedChart: null,
-  overtimeChart: null,
-  siteChart: null,
-  topEmployees: null,
+const ICON_PATHS = {
+  activity: 'M3 12h4l3-8 4 16 3-8h4',
+  alert: 'M12 9v4m0 4h.01M10.3 3.7 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.7a2 2 0 0 0-3.4 0Z',
+  building: 'M4 21V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v16M8 7h5M8 11h5M8 15h5M17 9h3v12',
+  check: 'm5 12 4 4L19 6',
+  clock: 'M12 7v5l3 2m6-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
+  shifts: 'M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z',
+  users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m7-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm13 10v-2a4 4 0 0 0-3-3h-1m0-12a4 4 0 0 1 0 7',
 }
 
-function reducer(state, action) {
-  switch (action.type) {
-    case 'SET_LOADING':
-      return { ...state, loading: action.payload }
-    case 'SET_ERROR':
-      return { ...state, error: action.payload, loading: false }
-    case 'SET_KPI':
-      return { ...state, kpi: action.payload }
-    case 'SET_FINANCIAL':
-      return { ...state, financialChart: action.payload }
-    case 'SET_SITE':
-      return { ...state, siteChart: action.payload }
-    case 'SET_ATTENDANCE':
-      return { ...state, attendanceChart: action.payload }
-    case 'SET_MISSED':
-      return { ...state, missedChart: action.payload }
-    case 'SET_OVERTIME':
-      return { ...state, overtimeChart: action.payload }
-    case 'SET_CURRENTLY_IN':
-      return { ...state, currentlyIn: action.payload }
-    case 'SET_TOP_EMPLOYEES':
-      return { ...state, topEmployees: action.payload }
-    default:
-      return state
-  }
-}
-
-// ─── Section wrapper ──────────────────────────────────────────────────────────
-function DashboardSection({ children, subtitle, title }) {
+function Icon({ name, size = 20 }) {
   return (
-    <section className="dash-section">
-      <header className="dash-section__header">
-        <h2 className="dash-section__title">{title}</h2>
-        {subtitle ? <p className="dash-section__subtitle">{subtitle}</p> : null}
-      </header>
-      {children}
-    </section>
+    <svg aria-hidden="true" fill="none" height={size} viewBox="0 0 24 24" width={size}>
+      <path d={ICON_PATHS[name]} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
   )
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
-function WidgetMeta({ count, label = 'metrics verified' }) {
+function formatMetric(value, format = 'number') {
+  const numeric = Number(value ?? 0)
+  if (format === 'percentage') return `${numeric.toFixed(1)}%`
+  if (format === 'hours') return `${numeric.toLocaleString(undefined, { maximumFractionDigits: 1 })}h`
+  return numeric.toLocaleString()
+}
+
+function formatShortDate(value) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(`${value}T00:00:00`))
+}
+
+function MetricCard({ accent, format, icon, inverse = false, label, note, trend, value }) {
+  const numericTrend = Number(trend ?? 0)
+  const favorable = inverse ? numericTrend <= 0 : numericTrend >= 0
+
   return (
-    <div className="widget-meta">
-      <span className="widget-meta__dot" aria-hidden="true" />
-      <span>{count} {label}</span>
+    <article className="metric-card" style={{ '--metric-accent': accent }}>
+      <div className="metric-card__top">
+        <span className="metric-card__icon"><Icon name={icon} /></span>
+        <span className={`metric-card__trend ${favorable ? 'metric-card__trend--good' : 'metric-card__trend--bad'}`}>
+          {numericTrend > 0 ? '+' : ''}{numericTrend.toFixed(1)}%
+        </span>
+      </div>
+      <p className="metric-card__value">{formatMetric(value, format)}</p>
+      <p className="metric-card__label">{label}</p>
+      <p className="metric-card__note">{note}</p>
+    </article>
+  )
+}
+
+function SectionHeading({ eyebrow, title, description, trailing }) {
+  return (
+    <header className="dashboard-heading">
+      <div>
+        <p className="dashboard-heading__eyebrow">{eyebrow}</p>
+        <h2>{title}</h2>
+        {description ? <p className="dashboard-heading__description">{description}</p> : null}
+      </div>
+      {trailing}
+    </header>
+  )
+}
+
+function DashboardLoading() {
+  return (
+    <div className="dashboard-v2 dashboard-v2--loading" aria-label="Loading live dashboard">
+      <div className="dashboard-shimmer dashboard-shimmer--hero" />
+      <div className="dashboard-shimmer-grid">
+        {Array.from({ length: 6 }, (_, index) => <div className="dashboard-shimmer" key={index} />)}
+      </div>
+      <div className="dashboard-shimmer-grid dashboard-shimmer-grid--charts">
+        <div className="dashboard-shimmer dashboard-shimmer--chart" />
+        <div className="dashboard-shimmer dashboard-shimmer--chart" />
+      </div>
     </div>
   )
 }
 
-// ─── Mini table for top performers ───────────────────────────────────────────
-function MiniTable({ columns, rows, title, subtitle }) {
-  if (!rows?.length) return null
+function EmployeeTable({ rows }) {
+  if (!rows.length) return <EmptyPanel message="No employee shifts in this period." />
+
   return (
-    <section className="panel mini-table">
-      <header className="panel__header">
-        <div>
-          <p className="panel__eyebrow">TABLE</p>
-          <h3 className="panel__title">{title}</h3>
-          {subtitle ? <p className="panel__subtitle">{subtitle}</p> : null}
-        </div>
-      </header>
-      <div className="mini-table__body">
+    <section className="dashboard-table-card">
+      <div className="dashboard-table-card__scroll">
         <table>
           <thead>
             <tr>
-              {columns.map((c) => <th key={c.key}>{c.label}</th>)}
+              <th>#</th>
+              <th>Employee</th>
+              <th>Shifts</th>
+              <th>Completed</th>
+              <th>Missed</th>
+              <th>Rostered</th>
+              <th>Actual</th>
+              <th>Completion</th>
             </tr>
           </thead>
           <tbody>
-            {rows.slice(0, 8).map((row, i) => (
-              <tr key={i}>
-                {columns.map((c) => (
-                  <td key={c.key}>
-                    {c.render ? c.render(row[c.key], row) : (row[c.key] ?? '—')}
-                  </td>
-                ))}
+            {rows.map((row, index) => (
+              <tr key={row.employee ?? index}>
+                <td><span className="employee-rank">{index + 1}</span></td>
+                <td>
+                  <div className="employee-cell">
+                    <span className="employee-cell__avatar">{String(row.employee ?? 'Unknown').slice(0, 2).toUpperCase()}</span>
+                    <strong>{row.employee ?? 'Unknown'}</strong>
+                  </div>
+                </td>
+                <td>{row.shift_count}</td>
+                <td><span className="value-pill value-pill--green">{row.completed_count}</span></td>
+                <td><span className={`value-pill ${row.missed_count ? 'value-pill--red' : 'value-pill--muted'}`}>{row.missed_count}</span></td>
+                <td>{formatMetric(row.rostered_hours, 'hours')}</td>
+                <td>{formatMetric(row.actual_hours, 'hours')}</td>
+                <td>
+                  <div className="completion-cell">
+                    <span>{Number(row.completion_rate ?? 0).toFixed(0)}%</span>
+                    <span className="completion-bar"><span style={{ width: `${Math.min(Number(row.completion_rate ?? 0), 100)}%` }} /></span>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -115,399 +136,282 @@ function MiniTable({ columns, rows, title, subtitle }) {
   )
 }
 
-// ─── Attendance exception pill ────────────────────────────────────────────────
-function AttendancePill({ value }) {
-  if (!value || value === 0 || value === '0') return <span className="apill apill--ok">0</span>
-  return <span className="apill apill--warn">{value}</span>
-}
-
-// ─── Main page ────────────────────────────────────────────────────────────────
-export default function DashboardPage() {
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE)
-
-  const start30 = daysAgoISO(30)
-  const start7 = daysAgoISO(7)
-  const end = todayISO()
-
-  const loadAll = useCallback(async () => {
-    dispatch({ type: 'SET_LOADING', payload: true })
-    dispatch({ type: 'SET_ERROR', payload: null })
-
-    const calls = [
-      // KPI: shift status summary last 30 days, grouped by status
-      executeReport({
-        reportType: 'shift_status_summary',
-        groupBy: 'shift_status',
-        metrics: ['shift_count', 'completed_count', 'missed_count', 'fill_rate'],
-        chartType: 'pie',
-        startDate: start30,
-        endDate: end,
-      }),
-      // Financial line chart — monthly revenue/wages/profit
-      executeReport({
-        reportType: 'financial_summary',
-        groupBy: 'month',
-        metrics: ['revenue', 'wages', 'gross_profit'],
-        chartType: 'line',
-        startDate: daysAgoISO(180),
-        endDate: end,
-      }),
-      // Site performance bar chart
-      executeReport({
-        reportType: 'site_performance',
-        groupBy: 'site',
-        metrics: ['shift_count', 'gross_profit'],
-        chartType: 'bar',
-        startDate: start30,
-        endDate: end,
-      }),
-      // Attendance exceptions last 30 days
-      executeReport({
-        reportType: 'attendance_exceptions',
-        groupBy: 'employee',
-        metrics: ['late_count', 'missed_count'],
-        chartType: 'bar',
-        startDate: start30,
-        endDate: end,
-        sortBy: 'late_count',
-        sortOrder: 'desc',
-        limit: 10,
-      }),
-      // Missed shifts by site last 30 days
-      executeReport({
-        reportType: 'missed_shifts',
-        groupBy: 'site',
-        metrics: ['missed_count'],
-        chartType: 'bar',
-        startDate: start30,
-        endDate: end,
-      }),
-      // Overtime summary by employee
-      executeReport({
-        reportType: 'overtime_summary',
-        groupBy: 'employee',
-        metrics: ['overtime_hours'],
-        chartType: 'bar',
-        startDate: start30,
-        endDate: end,
-        sortBy: 'overtime_hours',
-        sortOrder: 'desc',
-        limit: 10,
-      }),
-      // Currently clocked in (live)
-      executeReport({
-        reportType: 'currently_clocked_in',
-        groupBy: 'site',
-        metrics: ['shift_count'],
-        chartType: 'bar',
-      }),
-      // Employee hours last 7 days
-      executeReport({
-        reportType: 'employee_hours',
-        groupBy: 'employee',
-        metrics: ['rostered_hours', 'actual_hours'],
-        chartType: 'bar',
-        startDate: start7,
-        endDate: end,
-        sortBy: 'actual_hours',
-        sortOrder: 'desc',
-        limit: 10,
-      }),
-    ]
-
-    try {
-      const [
-        kpiResult,
-        financialResult,
-        siteResult,
-        attendanceResult,
-        missedResult,
-        overtimeResult,
-        currentlyInResult,
-        topEmployeesResult,
-      ] = await Promise.allSettled(calls)
-
-      dispatch({ type: 'SET_KPI', payload: kpiResult.status === 'fulfilled' ? kpiResult.value : null })
-      dispatch({ type: 'SET_FINANCIAL', payload: financialResult.status === 'fulfilled' ? financialResult.value : null })
-      dispatch({ type: 'SET_SITE', payload: siteResult.status === 'fulfilled' ? siteResult.value : null })
-      dispatch({ type: 'SET_ATTENDANCE', payload: attendanceResult.status === 'fulfilled' ? attendanceResult.value : null })
-      dispatch({ type: 'SET_MISSED', payload: missedResult.status === 'fulfilled' ? missedResult.value : null })
-      dispatch({ type: 'SET_OVERTIME', payload: overtimeResult.status === 'fulfilled' ? overtimeResult.value : null })
-      dispatch({ type: 'SET_CURRENTLY_IN', payload: currentlyInResult.status === 'fulfilled' ? currentlyInResult.value : null })
-      dispatch({ type: 'SET_TOP_EMPLOYEES', payload: topEmployeesResult.status === 'fulfilled' ? topEmployeesResult.value : null })
-    } catch (err) {
-      dispatch({ type: 'SET_ERROR', payload: err.message })
-    } finally {
-      dispatch({ type: 'SET_LOADING', payload: false })
-    }
-  }, [start30, start7, end])
-
-  useEffect(() => {
-    loadAll()
-  }, [loadAll])
-
-  // ── KPI derivation from shift_status_summary ────────────────────────────
-  const kpiCards = deriveKpiCards(state.kpi, state.currentlyIn)
-
-  if (state.loading) {
-    return (
-      <div className="page dash-loading">
-        <Loader label="Loading dashboard data…" />
-      </div>
-    )
-  }
-
+function LiveRoster({ rows }) {
   return (
-    <div className="page dash-page">
-      {/* ── Page header ──────────────────────────────────────────────── */}
-      <div className="dash-hero">
-        <div className="dash-hero__copy">
-          <h1 className="dash-hero__title">Operations Overview</h1>
-          <p className="dash-hero__sub">Live metrics from your workforce data · Last 30 days</p>
+    <section className="live-roster-card">
+      <div className="live-roster-card__header">
+        <div>
+          <p className="dashboard-heading__eyebrow">LIVE NOW</p>
+          <h3>Currently clocked in</h3>
         </div>
-        <button
-          type="button"
-          className="dash-refresh-btn"
-          onClick={loadAll}
-          title="Refresh dashboard"
-        >
-          <span aria-hidden="true">↻</span> Refresh
-        </button>
+        <span className="live-count"><span />{rows.length} active</span>
       </div>
-
-      <ErrorMessage message={state.error} />
-
-      {/* ── KPI stat cards ────────────────────────────────────────────── */}
-      <DashboardSection title="At a Glance" subtitle="Key performance indicators across all sites">
-        <WidgetMeta count={kpiCards.length} label="metrics verified" />
-        <div className="dash-kpi-grid">
-          {kpiCards.map((card) => (
-            <StatCard key={card.label} {...card} />
+      {rows.length ? (
+        <div className="live-roster-list">
+          {rows.map((row) => (
+            <div className="live-roster-row" key={row.shift_id}>
+              <span className="employee-cell__avatar employee-cell__avatar--live">{String(row.employee ?? 'Unknown').slice(0, 2).toUpperCase()}</span>
+              <div>
+                <strong>{row.employee ?? 'Unknown'}</strong>
+                <p>{row.site ?? 'Unknown site'}</p>
+              </div>
+              <span className="live-roster-row__time">{row.scheduled_start}–{row.scheduled_end}</span>
+            </div>
           ))}
         </div>
-      </DashboardSection>
-
-      {/* ── Financial + Site ─────────────────────────────────────────── */}
-      <DashboardSection title="Financial Performance" subtitle="Revenue, wages, and gross profit over time">
-        <div className="dash-main-grid">
-          {state.financialChart?.lineChart ?? state.financialChart?.chart ? (
-            <DynamicChart chart={state.financialChart.lineChart ?? state.financialChart.chart} preferArea />
-          ) : (
-            <ChartSkeleton title="Financial Summary" />
-          )}
-          {state.siteChart?.barChart ?? state.siteChart?.chart ? (
-            <DynamicChart chart={state.siteChart.barChart ?? state.siteChart.chart} preferArea={false} />
-          ) : (
-            <ChartSkeleton title="Site Performance" />
-          )}
-        </div>
-      </DashboardSection>
-
-      {/* ── Shift status donut + Currently in ───────────────────────── */}
-      <DashboardSection title="Shift Activity" subtitle="Status breakdown and live clock-ins">
-        <div className="dash-main-grid">
-          {state.kpi?.pieChart ?? state.kpi?.chart ? (
-            <DynamicChart chart={state.kpi.pieChart ?? { ...state.kpi.chart, type: 'pie' }} preferArea={false} />
-          ) : (
-            <ChartSkeleton title="Shift Status Breakdown" />
-          )}
-          {state.currentlyIn?.barChart ?? state.currentlyIn?.chart ? (
-            <DynamicChart chart={state.currentlyIn.barChart ?? state.currentlyIn.chart} preferArea={false} />
-          ) : (
-            <ChartSkeleton title="Currently Clocked In by Site" />
-          )}
-        </div>
-      </DashboardSection>
-
-      {/* ── Attendance + Overtime ─────────────────────────────────────── */}
-      <DashboardSection title="Attendance & Exceptions" subtitle="Late clock-ins, missed shifts, and overtime · last 30 days">
-        <div className="dash-triple-grid">
-          {state.attendanceChart?.barChart ?? state.attendanceChart?.chart ? (
-            <DynamicChart chart={state.attendanceChart.barChart ?? state.attendanceChart.chart} preferArea={false} />
-          ) : (
-            <ChartSkeleton title="Attendance Exceptions by Employee" />
-          )}
-          {state.missedChart?.barChart ?? state.missedChart?.chart ? (
-            <DynamicChart chart={state.missedChart.barChart ?? state.missedChart.chart} preferArea={false} />
-          ) : (
-            <ChartSkeleton title="Missed Shifts by Site" />
-          )}
-          {state.overtimeChart?.barChart ?? state.overtimeChart?.chart ? (
-            <DynamicChart chart={state.overtimeChart.barChart ?? state.overtimeChart.chart} preferArea={false} />
-          ) : (
-            <ChartSkeleton title="Overtime by Employee" />
-          )}
-        </div>
-      </DashboardSection>
-
-      {/* ── Employee hours table ──────────────────────────────────────── */}
-      <DashboardSection title="Top Employees" subtitle="Rostered vs actual hours · last 7 days">
-        <div className="dash-table-grid">
-          <MiniTable
-            title="Employee Hours"
-            subtitle="Sorted by actual hours worked"
-            columns={[
-              { key: 'employee', label: 'Employee' },
-              { key: 'rostered_hours', label: 'Rostered h', render: (v) => v != null ? `${Number(v).toFixed(1)}h` : '—' },
-              { key: 'actual_hours', label: 'Actual h', render: (v) => v != null ? `${Number(v).toFixed(1)}h` : '—' },
-              {
-                key: 'actual_hours',
-                label: 'Variance',
-                render: (v, row) => {
-                  const diff = Number(v ?? 0) - Number(row.rostered_hours ?? 0)
-                  const cls = diff >= 0 ? 'apill apill--ok' : 'apill apill--warn'
-                  return <span className={cls}>{diff >= 0 ? '+' : ''}{diff.toFixed(1)}h</span>
-                },
-              },
-            ]}
-            rows={state.topEmployees?.table?.rows ?? []}
-          />
-          <MiniTable
-            title="Attendance Exceptions"
-            subtitle="Employees with late or missed shifts"
-            columns={[
-              { key: 'employee', label: 'Employee' },
-              { key: 'late_count', label: 'Late', render: (v) => <AttendancePill value={v} /> },
-              { key: 'missed_count', label: 'Missed', render: (v) => <AttendancePill value={v} /> },
-            ]}
-            rows={state.attendanceChart?.table?.rows ?? []}
-          />
-        </div>
-      </DashboardSection>
-    </div>
+      ) : (
+        <div className="live-roster-empty"><Icon name="clock" size={24} /><span>No one is currently clocked in.</span></div>
+      )}
+    </section>
   )
 }
 
-// ─── Helper: derive KPI stat cards from API results ──────────────────────────
-function deriveKpiCards(kpiResult, currentlyIn) {
-  const cards = []
-
-  if (kpiResult?.summaryCards?.length) {
-    const lookup = Object.fromEntries(
-      kpiResult.summaryCards.map((c) => [c.label?.toLowerCase().replace(/\s+/g, '_'), c])
-    )
-
-    const shiftCard = kpiResult.summaryCards.find(
-      (c) => /shift.count|total.shift/i.test(c.label)
-    )
-    const completedCard = kpiResult.summaryCards.find(
-      (c) => /complet/i.test(c.label)
-    )
-    const missedCard = kpiResult.summaryCards.find(
-      (c) => /missed/i.test(c.label)
-    )
-    const fillCard = kpiResult.summaryCards.find(
-      (c) => /fill.rate/i.test(c.label)
-    )
-
-    if (shiftCard) {
-      cards.push({
-        label: shiftCard.label,
-        sublabel: 'Across all sites',
-        value: shiftCard.value,
-        format: shiftCard.format ?? 'number',
-        status: 'on-track',
-        icon: '📋',
-        accentColor: '#6d28d9',
-      })
-    }
-    if (completedCard) {
-      cards.push({
-        label: completedCard.label,
-        sublabel: 'Last 30 days',
-        value: completedCard.value,
-        format: completedCard.format ?? 'number',
-        status: 'on-track',
-        icon: '✅',
-        accentColor: '#10b981',
-      })
-    }
-    if (missedCard) {
-      const missed = Number(missedCard.value ?? 0)
-      cards.push({
-        label: missedCard.label,
-        sublabel: 'Requires review',
-        value: missedCard.value,
-        format: missedCard.format ?? 'number',
-        status: missed > 0 ? 'needs-action' : 'on-track',
-        icon: '⚠️',
-        accentColor: '#ef4444',
-      })
-    }
-    if (fillCard) {
-      const rate = Number(fillCard.value ?? 0)
-      cards.push({
-        label: fillCard.label,
-        sublabel: 'Shifts filled',
-        value: fillCard.value,
-        format: fillCard.format ?? 'percentage',
-        status: rate >= 90 ? 'on-track' : rate >= 75 ? 'warning' : 'needs-action',
-        icon: '📈',
-        accentColor: '#f59e0b',
-      })
-    }
-
-    // Fallback: show first 4 summary cards that didn't map above
-    if (cards.length === 0) {
-      kpiResult.summaryCards.slice(0, 4).forEach((c, i) => {
-        const ICONS = ['📋', '✅', '⚠️', '📈']
-        const COLORS = ['#6d28d9', '#10b981', '#f59e0b', '#ef4444']
-        cards.push({
-          label: c.label,
-          sublabel: 'Across all sites',
-          value: c.value,
-          format: c.format ?? 'number',
-          status: 'neutral',
-          icon: ICONS[i],
-          accentColor: COLORS[i],
-        })
-      })
-    }
-  }
-
-  // Live clock-in count
-  if (currentlyIn?.summaryCards?.length) {
-    const liveCard = currentlyIn.summaryCards[0]
-    cards.push({
-      label: 'Staff on site now',
-      sublabel: 'Currently clocked in',
-      value: liveCard.value,
-      format: 'number',
-      status: 'on-track',
-      icon: '👥',
-      accentColor: '#3b82f6',
-    })
-  }
-
-  // Pad with placeholders if we ended up with nothing
-  if (cards.length === 0) {
-    return [
-      { label: 'Total Shifts', sublabel: 'No data', value: '—', status: 'neutral', icon: '📋', accentColor: '#6d28d9' },
-      { label: 'Completed', sublabel: 'No data', value: '—', status: 'neutral', icon: '✅', accentColor: '#10b981' },
-      { label: 'Missed Shifts', sublabel: 'No data', value: '—', status: 'neutral', icon: '⚠️', accentColor: '#ef4444' },
-      { label: 'Staff on Site', sublabel: 'No data', value: '—', status: 'neutral', icon: '👥', accentColor: '#3b82f6' },
-    ]
-  }
-
-  return cards
-}
-
-// ─── Chart skeleton ───────────────────────────────────────────────────────────
-function ChartSkeleton({ title }) {
+function InsightCard({ employee, risk, site }) {
   return (
-    <section className="panel chart-card chart-skeleton">
-      <header className="panel__header">
-        <div>
-          <p className="panel__eyebrow">CHART</p>
-          <h3 className="panel__title">{title}</h3>
+    <section className="insight-card">
+      <p className="dashboard-heading__eyebrow">QUICK READ</p>
+      <h3>What deserves attention</h3>
+      <div className="insight-list">
+        <div className="insight-item">
+          <span className="insight-item__icon insight-item__icon--purple"><Icon name="users" /></span>
+          <div><span>Highest workload</span><strong>{employee ? `${employee.employee} · ${employee.shift_count} shifts` : 'No employee data'}</strong></div>
         </div>
-      </header>
-      <div className="panel__body chart-frame">
-        <div className="chart-empty">
-          <span className="chart-empty__icon" aria-hidden="true">📊</span>
-          <p>No data available</p>
+        <div className="insight-item">
+          <span className="insight-item__icon insight-item__icon--blue"><Icon name="building" /></span>
+          <div><span>Busiest site</span><strong>{site ? `${site.site} · ${site.shift_count} shifts` : 'No site data'}</strong></div>
+        </div>
+        <div className="insight-item">
+          <span className="insight-item__icon insight-item__icon--orange"><Icon name="alert" /></span>
+          <div><span>Most operational flags</span><strong>{risk ? risk.site : 'No active risk flags'}</strong></div>
         </div>
       </div>
     </section>
+  )
+}
+
+function EmptyPanel({ message }) {
+  return <div className="dashboard-empty"><Icon name="activity" /><span>{message}</span></div>
+}
+
+function createCharts(snapshot) {
+  if (!snapshot) return {}
+
+  const siteComparisonHeight = Math.max(
+    430,
+    Math.max(snapshot.siteComparison.length, snapshot.riskBySite.length) * 34,
+  )
+
+  return {
+    employeeHours: {
+      data: snapshot.employeeComparison,
+      description: 'Scheduled workload compared with hours represented by worked statuses for every named employee.',
+      formatByKey: { actual_hours: 'hours', rostered_hours: 'hours' },
+      height: Math.max(420, snapshot.employeeComparison.length * 35),
+      layout: 'vertical',
+      series: [
+        { color: '#7c3aed', dataKey: 'rostered_hours', name: 'Rostered hours' },
+        { color: '#14b8a6', dataKey: 'actual_hours', name: 'Actual hours' },
+      ],
+      title: 'Hours by employee',
+      type: 'bar',
+      xAxisKey: 'employee',
+      yAxisWidth: 150,
+    },
+    employeeShifts: {
+      data: snapshot.employeeComparison,
+      description: 'All named employees compared by total, completed, and missed shifts.',
+      formatByKey: { completed_count: 'number', missed_count: 'number', shift_count: 'number' },
+      height: Math.max(420, snapshot.employeeComparison.length * 35),
+      layout: 'vertical',
+      series: [
+        { color: '#7c3aed', dataKey: 'shift_count', name: 'All shifts' },
+        { color: '#10b981', dataKey: 'completed_count', name: 'Completed' },
+        { color: '#f43f5e', dataKey: 'missed_count', name: 'Missed' },
+      ],
+      title: 'Shift comparison by employee',
+      type: 'bar',
+      xAxisKey: 'employee',
+      yAxisWidth: 150,
+    },
+    risk: {
+      data: snapshot.riskBySite,
+      description: 'Break, overlap, compliance, and visa/passport flags from live roster records.',
+      height: siteComparisonHeight,
+      layout: 'vertical',
+      series: [
+        { color: '#f59e0b', dataKey: 'break_conflicts', name: 'Break conflict' },
+        { color: '#f43f5e', dataKey: 'overlap_conflicts', name: 'Overlap conflict' },
+        { color: '#8b5cf6', dataKey: 'compliance_critical', name: 'Compliance' },
+        { color: '#0ea5e9', dataKey: 'visa_critical', name: 'Visa / passport' },
+      ],
+      title: 'Operational flags by site',
+      type: 'bar',
+      xAxisKey: 'site',
+      yAxisWidth: 145,
+    },
+    sites: {
+      data: snapshot.siteComparison,
+      description: 'Every active site compared by scheduled coverage and exceptions.',
+      height: siteComparisonHeight,
+      layout: 'vertical',
+      series: [
+        { color: '#2563eb', dataKey: 'shift_count', name: 'All shifts' },
+        { color: '#10b981', dataKey: 'completed_count', name: 'Completed' },
+        { color: '#f59e0b', dataKey: 'unfilled_count', name: 'Unfilled' },
+        { color: '#f43f5e', dataKey: 'missed_count', name: 'Missed' },
+      ],
+      title: 'Coverage by site',
+      type: 'bar',
+      xAxisKey: 'site',
+      yAxisWidth: 145,
+    },
+    status: {
+      centerLabel: 'shifts',
+      centerValue: snapshot.kpis.total,
+      data: snapshot.statusDistribution,
+      description: 'FieldServicer status distribution using the mapped StatusID values.',
+      height: 340,
+      series: [{ dataKey: 'count', name: 'Shifts' }],
+      title: 'Roster status mix',
+      type: 'pie',
+      xAxisKey: 'status',
+    },
+    trend: {
+      data: snapshot.shiftTrend,
+      description: 'Daily shift volume and outcomes across the selected period.',
+      height: 340,
+      series: [
+        { color: '#7c3aed', dataKey: 'shift_count', name: 'All shifts' },
+        { color: '#10b981', dataKey: 'completed_count', name: 'Completed' },
+        { color: '#f59e0b', dataKey: 'unfilled_count', name: 'Unfilled' },
+        { color: '#f43f5e', dataKey: 'missed_count', name: 'Missed' },
+      ],
+      title: 'Shift activity over time',
+      type: 'line',
+      xAxisKey: 'date',
+    },
+  }
+}
+
+export default function DashboardPage() {
+  const [days, setDays] = useState(30)
+  const [snapshot, setSnapshot] = useState(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadDashboard = useCallback(async (forceRefresh = false) => {
+    if (forceRefresh) setRefreshing(true)
+    else setLoading(true)
+    setError('')
+
+    try {
+      setSnapshot(await fetchDashboard({ days, refresh: forceRefresh }))
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [days])
+
+  useEffect(() => {
+    loadDashboard()
+  }, [loadDashboard])
+
+  const charts = useMemo(() => createCharts(snapshot), [snapshot])
+
+  if (loading && !snapshot) return <DashboardLoading />
+
+  const kpis = snapshot?.kpis ?? {}
+  const changes = kpis.changes ?? {}
+  const topEmployee = snapshot?.employeeComparison?.[0]
+  const topSite = snapshot?.siteComparison?.[0]
+  const topRisk = snapshot?.riskBySite?.[0]
+  const totalFlags = snapshot?.riskBySite?.reduce((total, row) => (
+    total + row.break_conflicts + row.overlap_conflicts + row.compliance_critical + row.visa_critical
+  ), 0) ?? 0
+
+  return (
+    <div className="page dashboard-v2">
+      <section className="dashboard-v2__hero">
+        <div className="dashboard-v2__hero-orb dashboard-v2__hero-orb--one" />
+        <div className="dashboard-v2__hero-orb dashboard-v2__hero-orb--two" />
+        <div className="dashboard-v2__hero-copy">
+          <span className="dashboard-v2__live"><span /> Live operations intelligence</span>
+          <h1>Workforce command center</h1>
+          <p>One clear view of coverage, people, sites, and operational risk—powered directly by FieldServicer.</p>
+          <div className="dashboard-v2__hero-meta">
+            <span>{formatShortDate(snapshot?.meta?.from)} – {formatShortDate(snapshot?.meta?.to)}</span>
+            <span>{kpis.active_employees ?? 0} active employees</span>
+            <span>{kpis.active_sites ?? 0} active sites</span>
+          </div>
+        </div>
+        <div className="dashboard-v2__controls">
+          <div className="period-switcher" aria-label="Dashboard date range">
+            {PERIODS.map((period) => (
+              <button
+                className={days === period.days ? 'period-switcher__button period-switcher__button--active' : 'period-switcher__button'}
+                key={period.days}
+                onClick={() => setDays(period.days)}
+                type="button"
+              >
+                {period.label}
+              </button>
+            ))}
+          </div>
+          <button className="dashboard-v2__refresh" disabled={refreshing} onClick={() => loadDashboard(true)} type="button">
+            <span className={refreshing ? 'spin' : ''}><Icon name="refresh" size={17} /></span>
+            {refreshing ? 'Refreshing' : 'Refresh live data'}
+          </button>
+        </div>
+      </section>
+
+      <ErrorMessage message={error} />
+
+      <section className="metric-grid">
+        <MetricCard accent="#7c3aed" icon="shifts" label="Total shifts" note="Compared with previous period" trend={changes.total} value={kpis.total} />
+        <MetricCard accent="#10b981" icon="check" label="Completed" note={`${kpis.clocked_out ?? 0} clocked-out records`} trend={changes.completed} value={kpis.completed} />
+        <MetricCard accent="#2563eb" format="percentage" icon="activity" label="Fill rate" note={`${kpis.unfilled ?? 0} currently unfilled`} value={kpis.fill_rate} />
+        <MetricCard accent="#06b6d4" icon="clock" label="Clocked in now" note="Live FieldServicer status" value={kpis.clocked_in} />
+        <MetricCard accent="#f59e0b" icon="users" label="Rostered hours" note="Across named employees" trend={changes.rostered_hours} value={kpis.rostered_hours} format="hours" />
+        <MetricCard accent="#f43f5e" icon="alert" inverse label="Unfilled shifts" note="Compared with previous period" trend={changes.unfilled} value={kpis.unfilled} />
+      </section>
+
+      <section className="dashboard-section-v2">
+        <SectionHeading eyebrow="OPERATIONS" title="The pulse of your roster" description="Volume, outcomes, and live status distribution across the selected period." />
+        <div className="dashboard-chart-grid dashboard-chart-grid--pulse">
+          <DynamicChart chart={charts.trend} preferArea />
+          <DynamicChart chart={charts.status} preferArea={false} />
+        </div>
+      </section>
+
+      <section className="dashboard-section-v2">
+        <SectionHeading
+          eyebrow="PEOPLE"
+          title="Every employee, compared"
+          description="All named employees are included—no single-bar summaries or hidden performers. Unassigned shifts remain in operational totals but are excluded from employee rankings."
+          trailing={<span className="section-count">{snapshot?.employeeComparison?.length ?? 0} employees</span>}
+        />
+        <div className="dashboard-chart-grid dashboard-chart-grid--employees">
+          <DynamicChart chart={charts.employeeShifts} preferArea={false} />
+          <DynamicChart chart={charts.employeeHours} preferArea={false} />
+        </div>
+        <EmployeeTable rows={snapshot?.employeeComparison ?? []} />
+      </section>
+
+      <section className="dashboard-section-v2">
+        <SectionHeading eyebrow="LOCATIONS" title="Coverage and operational risk" description="Compare every site using real shift coverage and conflict flags from the roster API." trailing={<span className="section-count">{totalFlags} flags</span>} />
+        <div className="dashboard-chart-grid dashboard-chart-grid--sites">
+          <DynamicChart chart={charts.sites} preferArea={false} />
+          {snapshot?.riskBySite?.length ? <DynamicChart chart={charts.risk} preferArea={false} /> : <EmptyPanel message="No operational flags in this period." />}
+        </div>
+      </section>
+
+      <section className="dashboard-bottom-grid">
+        <LiveRoster rows={snapshot?.liveRoster ?? []} />
+        <InsightCard employee={topEmployee} risk={topRisk} site={topSite} />
+      </section>
+    </div>
   )
 }

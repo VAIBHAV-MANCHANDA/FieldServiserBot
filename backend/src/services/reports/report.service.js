@@ -73,7 +73,7 @@ function deriveChartsFromLookupRows(rows, reportType) {
 }
 
 // ─── Main execute ────────────────────────────────────────────────────────────
-export async function executeReport(intent) {
+export async function executeReport(intent, { toolContext = null } = {}) {
   const definition = getReportDefinition(intent.reportType)
 
   if (!definition) {
@@ -137,11 +137,18 @@ export async function executeReport(intent) {
     ),
   }
 
-  const message = reportResult.message ?? await summarizeReport({
+  const summaryPayload = {
     appliedFilters,
+    assumption: intent.assumption,
     rows,
     summaryCards,
-  })
+    toolContext,
+    toolName: intent.toolName,
+    userQuery: intent.understoodQuery,
+  }
+  const message = toolContext
+    ? await summarizeReport(summaryPayload)
+    : reportResult.message ?? await summarizeReport(summaryPayload)
 
   return {
     appliedFilters,

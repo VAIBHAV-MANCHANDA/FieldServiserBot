@@ -3,6 +3,7 @@ import './App.css'
 import AiAssistantPage from './pages/AiAssistantPage.jsx'
 import ChatHistoryPage from './pages/ChatHistoryPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
+import PageErrorBoundary from './components/common/PageErrorBoundary.jsx'
 
 const navItems = [
   { label: 'AI Assistant', path: '/', shortcut: 'AI' },
@@ -67,7 +68,7 @@ function App() {
         <main className="app-shell__main">
           <Routes>
             <Route element={<AiAssistantPage />} path="/" />
-            <Route element={<DashboardPage />} path="/dashboard" />
+            <Route element={<PageErrorBoundary><DashboardPage /></PageErrorBoundary>} path="/dashboard" />
             <Route element={<ChatHistoryPage />} path="/history" />
           </Routes>
         </main>

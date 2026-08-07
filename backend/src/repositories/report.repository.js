@@ -23,7 +23,7 @@ function getDateRange(intent) {
 
 // ─── Fetch shifts from FieldServicer API ─────────────────────────────────────
 
-async function fetchShifts(intent) {
+async function fetchShifts(intent, { forceRefresh = false } = {}) {
   const { from, to } = getDateRange(intent)
   try {
     const raw = await fieldServicerClient.getRosterShiftList({
@@ -31,11 +31,17 @@ async function fetchShifts(intent) {
       clientId: intent.filters?.customerId ?? 0,
       fromDate: from,
       toDate: to,
+      forceRefresh,
     })
     return normalizeShifts(raw)
   } catch (error) {
     logger.error('Failed to fetch shifts from FieldServicer API', { error: error.message })
-    return []
+    const upstreamError = new Error('Unable to load live shift data from FieldServicer.')
+    upstreamError.code = 'FIELDSERVICER_API_ERROR'
+    upstreamError.status = 502
+    upstreamError.expose = true
+    upstreamError.cause = error
+    throw upstreamError
   }
 }
 
@@ -49,23 +55,22 @@ async function fetchShifts(intent) {
  *   StatusID, ShiftType, ShiftTypeID, SupplierName, IsBreakConflict,
  *   IsOverlapConflict, IsComplianceCritical, IsVisaPassportCritical, etc.
  *
- * StatusID values (confirmed from DB screenshot):
- *   1=Unpublish, 2=Published, 3=Clocked-In, 4=Clocked-Out,
- *   5=Approved, 6=Rejected, 7=Deleted, 9=UnAssigned,
- *   10=Submitted, 11=Accepted, 12=Pending
+ * Status definitions confirmed from the FieldServicer status reference.
+ * StatusID is authoritative; response title/color fields are fallbacks for
+ * IDs not yet present in this map.
  */
-const STATUS_MAP = {
-  1: 'Unpublish',
-  2: 'Published',
-  3: 'Clocked-In',
-  4: 'Clocked-Out',
-  5: 'Approved',
-  6: 'Rejected',
-  7: 'Deleted',
-  9: 'UnAssigned',
-  10: 'Submitted',
-  11: 'Accepted',
-  12: 'Pending',
+const STATUS_DEFINITIONS = {
+  1: { title: 'Unpublish', bgColor: '#fff4b3', txtColor: 'Black' },
+  2: { title: 'Published', bgColor: '#fffe42', txtColor: 'Black' },
+  3: { title: 'Clocked-In', bgColor: '#23d06c', txtColor: 'Black' },
+  4: { title: 'Clocked-Out', bgColor: '#697390', txtColor: 'Black' },
+  5: { title: 'Approved', bgColor: '#9ccf7a', txtColor: 'Black' },
+  6: { title: 'Rejected', bgColor: '#e42048', txtColor: 'Black' },
+  7: { title: 'Deleted', bgColor: '#ffae42', txtColor: 'Black' },
+  9: { title: 'UnAssigned', bgColor: '#ee82ee', txtColor: 'Black' },
+  10: { title: 'Submitted', bgColor: '#697390', txtColor: 'Black' },
+  11: { title: 'Accepted', bgColor: '#9ccf7a', txtColor: 'Black' },
+  12: { title: 'Clocked-Out', bgColor: '#697390', txtColor: 'Black' },
 }
 
 // Map raw statuses → analytics categories used by the report engine
@@ -85,8 +90,11 @@ const ANALYTICS_STATUS_MAP = {
 
 function normalizeShifts(raw) {
   return raw.map(s => {
-    // Use Status_Title directly if present, fall back to StatusID map
-    const rawStatus = s.Status_Title ?? STATUS_MAP[s.StatusID] ?? 'Unknown'
+    const statusId = Number(s.StatusID)
+    const statusDefinition = STATUS_DEFINITIONS[statusId]
+    const rawStatus = statusDefinition?.title ?? s.Status_Title ?? 'Unknown'
+    const statusBgColor = statusDefinition?.bgColor ?? s.Status_BgColor ?? null
+    const statusTxtColor = statusDefinition?.txtColor ?? s.Status_TxtColor ?? null
     const shiftStatus = ANALYTICS_STATUS_MAP[rawStatus] ?? rawStatus
 
     // Total_Hours is provided directly by the API — no calculation needed
@@ -110,7 +118,7 @@ function normalizeShifts(raw) {
       customer_id: null, // not in this endpoint
 
       // Names
-      employee_name: s.EmployeeName ?? 'Unassigned',
+      employee_name: String(s.EmployeeName ?? '').trim() || 'Unassigned',
       site_name:     s.Location_Name ?? 'Unknown',
       customer_name: s.SupplierName ?? 'Unknown',  // SupplierName = client/company
       department:    s.ShiftType ?? 'Work',         // closest available grouping
@@ -123,8 +131,11 @@ function normalizeShifts(raw) {
       day_name:   s.Dated_Name ?? null,
 
       // Status
+      status_id:          Number.isFinite(statusId) ? statusId : null,
       shift_status:      shiftStatus,
       raw_status:        rawStatus,
+      status_bg_color:   statusBgColor,
+      status_txt_color:  statusTxtColor,
       attendance_status: deriveAttendanceStatus(shiftStatus, rawStatus),
 
       // Times (stored as "HH:MM" strings in the API)
@@ -136,16 +147,8 @@ function normalizeShifts(raw) {
       rostered_hours:      totalHours,
       actual_hours:        actualHours,
       site_hours:          parseFloat(s.Site_Hours ?? 0),
-      overtime_hours:      Math.max(0, actualHours - totalHours),
-      late_minutes:        0, // not available in this endpoint
-      early_leave_minutes: 0, // not available in this endpoint
 
       // Financials — not in this endpoint, default to 0
-      pay_rate:    0,
-      charge_rate: 0,
-      wages:       0,
-      revenue:     0,
-      gross_profit: 0,
 
       // Conflict flags
       is_break_conflict:   s.IsBreakConflict === 1,
@@ -158,7 +161,7 @@ function normalizeShifts(raw) {
 
 function deriveAttendanceStatus(shiftStatus, rawStatus) {
   if (rawStatus === 'Clocked-In')  return 'Clocked In'
-  if (rawStatus === 'Clocked-Out') return 'Completed'
+  if (rawStatus === 'Clocked-Out') return 'Clocked Out'
   if (shiftStatus === 'Completed') return 'Completed'
   if (shiftStatus === 'Missed')    return 'Missed'
   if (shiftStatus === 'Scheduled') return 'Not Started'
@@ -179,16 +182,54 @@ function weekKey(date) {
   return `${year}-W${String(week).padStart(2, '0')}`
 }
 
+function normalizeSearchText(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex]
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
+      )
+    }
+    previous.splice(0, previous.length, ...current)
+  }
+
+  return previous[right.length]
+}
+
+export function matchesLookupText(actualValue, requestedValue) {
+  const actual = normalizeSearchText(actualValue)
+  const requested = normalizeSearchText(requestedValue)
+  if (!actual || !requested) return false
+  if (actual.includes(requested) || requested.includes(actual)) return true
+
+  const tolerance = Math.max(1, Math.floor(Math.max(actual.length, requested.length) * 0.22))
+  return editDistance(actual, requested) <= tolerance
+}
+
 // ─── Filtering ────────────────────────────────────────────────────────────────
 
 function applyFilters(shifts, intent) {
   const f = intent.filters ?? {}
   return shifts.filter(s => {
+    if (f.employeeId !== undefined && f.employeeId !== null && s.employee_id !== f.employeeId) return false
     if (f.department && s.department !== f.department) return false
     if (f.position && s.position !== f.position) return false
-    if (f.customer && s.customer_name !== f.customer) return false
-    if (f.site && s.site_name !== f.site) return false
-    if (f.employee && s.employee_name !== f.employee) return false
+    if (f.customer && !matchesLookupText(s.customer_name, f.customer)) return false
+    if (f.site && !matchesLookupText(s.site_name, f.site)) return false
+    if (f.siteId !== undefined && f.siteId !== null && s.site_id !== f.siteId) return false
+    if (f.employee && !matchesLookupText(s.employee_name, f.employee)) return false
+    if (f.statusIds?.length && !f.statusIds.includes(s.status_id)) return false
     if (f.statuses?.length && !f.statuses.includes(s.shift_status)) return false
     if (f.attendanceStatuses?.length && !f.attendanceStatuses.includes(s.attendance_status)) return false
     return true
@@ -220,31 +261,170 @@ const METRIC_AGGREGATORS = {
     if (!total) return 0
     return round(rows.filter(r => r.shift_status === 'Completed').length / total * 100)
   },
-  early_leave_minutes: rows => rows.reduce((s, r) => s + (r.early_leave_minutes ?? 0), 0),
   fill_rate: rows => {
     const total = rows.length
     if (!total) return 0
     const filled = rows.filter(r => !['Unfilled', 'Cancelled'].includes(r.shift_status)).length
     return round(filled / total * 100)
   },
-  gross_margin_percentage: rows => {
-    const rev = rows.reduce((s, r) => s + (r.revenue ?? 0), 0)
-    const profit = rows.reduce((s, r) => s + (r.gross_profit ?? 0), 0)
-    return rev ? round(profit / rev * 100) : 0
-  },
-  gross_profit: rows => round(rows.reduce((s, r) => s + (r.gross_profit ?? 0), 0)),
-  late_count: rows => rows.filter(r => r.late_minutes > 0).length,
-  late_minutes: rows => rows.reduce((s, r) => s + (r.late_minutes ?? 0), 0),
   missed_count: rows => rows.filter(r => r.shift_status === 'Missed').length,
-  overtime_hours: rows => round(rows.reduce((s, r) => s + (r.overtime_hours ?? 0), 0)),
-  revenue: rows => round(rows.reduce((s, r) => s + (r.revenue ?? 0), 0)),
   rostered_hours: rows => round(rows.reduce((s, r) => s + (r.rostered_hours ?? 0), 0)),
   shift_count: rows => rows.length,
   unfilled_count: rows => rows.filter(r => r.shift_status === 'Unfilled').length,
-  wages: rows => round(rows.reduce((s, r) => s + (r.wages ?? 0), 0)),
 }
 
 function round(n) { return Math.round(n * 100) / 100 }
+
+function percentChange(current, previous) {
+  if (!previous) return current ? 100 : 0
+  return round((current - previous) / previous * 100)
+}
+
+function shiftSummary(rows) {
+  const total = rows.length
+  const completed = rows.filter(row => row.shift_status === 'Completed').length
+  const scheduled = rows.filter(row => row.shift_status === 'Scheduled').length
+  const missed = rows.filter(row => row.shift_status === 'Missed').length
+  const unfilled = rows.filter(row => row.shift_status === 'Unfilled').length
+  const cancelled = rows.filter(row => row.shift_status === 'Cancelled').length
+
+  return {
+    actual_hours: round(rows.reduce((sum, row) => sum + row.actual_hours, 0)),
+    cancelled,
+    clocked_in: rows.filter(row => row.raw_status === 'Clocked-In').length,
+    clocked_out: rows.filter(row => row.raw_status === 'Clocked-Out').length,
+    completed,
+    completion_rate: total ? round(completed / total * 100) : 0,
+    fill_rate: total ? round((total - unfilled - cancelled) / total * 100) : 0,
+    missed,
+    rostered_hours: round(rows.reduce((sum, row) => sum + row.rostered_hours, 0)),
+    scheduled,
+    total,
+    unfilled,
+  }
+}
+
+function groupDashboardRows(rows, key, labelKey) {
+  const groups = new Map()
+
+  for (const row of rows) {
+    const label = row[key] || 'Unknown'
+    if (!groups.has(label)) groups.set(label, [])
+    groups.get(label).push(row)
+  }
+
+  return [...groups.entries()].map(([label, groupRows]) => {
+    const summary = shiftSummary(groupRows)
+    return {
+      [labelKey]: label,
+      ...summary,
+      completed_count: summary.completed,
+      missed_count: summary.missed,
+      scheduled_count: summary.scheduled,
+      shift_count: summary.total,
+      unfilled_count: summary.unfilled,
+      break_conflicts: groupRows.filter(row => row.is_break_conflict).length,
+      compliance_critical: groupRows.filter(row => row.is_compliance_critical).length,
+      overlap_conflicts: groupRows.filter(row => row.is_overlap_conflict).length,
+      visa_critical: groupRows.filter(row => row.is_visa_critical).length,
+    }
+  })
+}
+
+function addDaysToDateOnly(value, days) {
+  const date = new Date(`${value}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+export async function getDashboardSnapshot({ forceRefresh = false, from, to }) {
+  const rangeDays = Math.round((new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86400000) + 1
+  const previousTo = addDaysToDateOnly(from, -1)
+  const previousFrom = addDaysToDateOnly(previousTo, -(rangeDays - 1))
+  const allRows = await fetchShifts({
+    dateRange: { from: previousFrom, to },
+    filters: {},
+  }, { forceRefresh })
+
+  const currentRows = allRows.filter(row => row.shift_date >= from && row.shift_date <= to)
+  const previousRows = allRows.filter(row => row.shift_date >= previousFrom && row.shift_date <= previousTo)
+  const current = shiftSummary(currentRows)
+  const previous = shiftSummary(previousRows)
+
+  const employeeComparison = groupDashboardRows(
+    currentRows.filter(row => row.employee_name !== 'Unassigned'),
+    'employee_name',
+    'employee',
+  ).sort((a, b) => b.shift_count - a.shift_count || b.rostered_hours - a.rostered_hours)
+
+  const siteComparison = groupDashboardRows(currentRows, 'site_name', 'site')
+    .sort((a, b) => b.shift_count - a.shift_count)
+
+  const shiftTrend = groupDashboardRows(currentRows, 'shift_date', 'date')
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  const statusMap = new Map()
+  for (const row of currentRows) {
+    const key = row.raw_status
+    const existing = statusMap.get(key) ?? {
+      color: row.status_bg_color,
+      count: 0,
+      status: key,
+      status_id: row.status_id,
+    }
+    existing.count += 1
+    statusMap.set(key, existing)
+  }
+
+  const liveRoster = currentRows
+    .filter(row => row.raw_status === 'Clocked-In')
+    .map(row => ({
+      employee: row.employee_name,
+      scheduled_end: row.scheduled_end,
+      scheduled_start: row.scheduled_start,
+      site: row.site_name,
+      shift_id: row.shift_id,
+      status: row.raw_status,
+    }))
+
+  const riskBySite = siteComparison
+    .filter(row => row.break_conflicts || row.overlap_conflicts || row.compliance_critical || row.visa_critical)
+    .sort((a, b) => (
+      b.break_conflicts + b.overlap_conflicts + b.compliance_critical + b.visa_critical
+    ) - (
+      a.break_conflicts + a.overlap_conflicts + a.compliance_critical + a.visa_critical
+    ))
+
+  return {
+    employeeComparison,
+    kpis: {
+      ...current,
+      active_employees: employeeComparison.length,
+      active_sites: siteComparison.length,
+      changes: {
+        actual_hours: percentChange(current.actual_hours, previous.actual_hours),
+        completed: percentChange(current.completed, previous.completed),
+        missed: percentChange(current.missed, previous.missed),
+        rostered_hours: percentChange(current.rostered_hours, previous.rostered_hours),
+        total: percentChange(current.total, previous.total),
+        unfilled: percentChange(current.unfilled, previous.unfilled),
+      },
+    },
+    liveRoster,
+    meta: {
+      from,
+      generatedAt: new Date().toISOString(),
+      previousFrom,
+      previousTo,
+      source: 'FieldServicer API',
+      to,
+    },
+    riskBySite,
+    shiftTrend,
+    siteComparison,
+    statusDistribution: [...statusMap.values()].sort((a, b) => b.count - a.count),
+  }
+}
 
 function aggregate(shifts, intent) {
   const groupField = GROUP_KEY_MAP[intent.groupBy] ?? 'shift_status'
@@ -302,10 +482,10 @@ async function runDataLookupReport(intent) {
 
   const entity = intent.entity ?? 'shifts'
 
-  let rows = filtered
+  let rows = projectLookupRows(filtered, entity)
   if (search) {
     rows = rows.filter(r =>
-      Object.values(r).some(v => String(v ?? '').toLowerCase().includes(search))
+      Object.values(r).some(v => matchesLookupText(v, search))
     )
   }
 
@@ -318,17 +498,51 @@ async function runDataLookupReport(intent) {
   }
 }
 
+function projectLookupRows(rows, entity) {
+  if (!['employees', 'sites', 'customers'].includes(entity)) return rows
+
+  const unique = new Map()
+
+  for (const row of rows) {
+    if (entity === 'employees' && row.employee_name !== 'Unassigned') {
+      const key = row.employee_id ?? row.employee_name
+      if (!unique.has(key)) {
+        unique.set(key, {
+          department: row.department,
+          employee_name: row.employee_name,
+          position: row.position,
+          status: 'Rostered',
+        })
+      }
+    } else if (entity === 'sites') {
+      const key = row.site_id ?? row.site_name
+      if (!unique.has(key)) {
+        unique.set(key, {
+          customer_name: row.customer_name,
+          site_name: row.site_name,
+        })
+      }
+    } else if (entity === 'customers') {
+      const key = row.customer_name
+      if (!unique.has(key)) unique.set(key, { customer_name: row.customer_name })
+    }
+  }
+
+  return [...unique.values()]
+}
+
 function getDefaultColumns(entity) {
   const byEntity = {
     attendance: [
       { key: 'shift_date', label: 'Shift Date' },
       { key: 'employee_name', label: 'Employee' },
+      { key: 'status_id', label: 'Status ID', format: 'number' },
+      { key: 'raw_status', label: 'FieldServicer Status' },
       { key: 'attendance_status', label: 'Attendance Status' },
       { key: 'shift_status', label: 'Shift Status' },
-      { key: 'clock_in_datetime', label: 'Clock In' },
-      { key: 'clock_out_datetime', label: 'Clock Out' },
+      { key: 'scheduled_start', label: 'Scheduled Start' },
+      { key: 'scheduled_end', label: 'Scheduled End' },
       { key: 'actual_hours', label: 'Actual Hours', format: 'number' },
-      { key: 'late_minutes', label: 'Late Minutes', format: 'number' },
     ],
     employees: [
       { key: 'employee_name', label: 'Employee' },
@@ -337,6 +551,8 @@ function getDefaultColumns(entity) {
     ],
     shifts: [
       { key: 'shift_date', label: 'Shift Date' },
+      { key: 'status_id', label: 'Status ID', format: 'number' },
+      { key: 'raw_status', label: 'FieldServicer Status' },
       { key: 'shift_status', label: 'Status' },
       { key: 'employee_name', label: 'Employee' },
       { key: 'customer_name', label: 'Customer' },
@@ -376,14 +592,20 @@ export const reportRepository = {
   getEmployeeDirectory: intent => runEmployeeDirectoryReport(intent),
   getEmployeeHours: intent => runAggregateReport(intent),
   getEmployeeShiftCount: intent => runAggregateReport(intent),
-  getFinancialSummary: intent => runAggregateReport(intent),
-  getLateClockIns: intent => runAggregateReport(intent, { attendanceStatuses: ['Late'] }),
   getMissedShifts: intent => runAggregateReport(intent, { statuses: ['Missed'] }),
-  getOvertimeSummary: intent => runAggregateReport(intent),
   getShiftStatusSummary: intent => runAggregateReport(intent),
   getShiftTrend: intent => runAggregateReport(intent),
   getSitePerformance: intent => runAggregateReport(intent),
 }
 
 // No-op — no DB to log to. Logging stays in memory via Winston.
-export async function logAiQuery() {}
+export async function logAiQuery(entry) {
+  logger.info('AI workforce query completed.', {
+    event: 'ai_query',
+    executionTimeMs: entry.executionTimeMs,
+    reportType: entry.reportType,
+    resultCount: entry.resultCount,
+    status: entry.status,
+    toolName: entry.intent?.toolName ?? null,
+  })
+}

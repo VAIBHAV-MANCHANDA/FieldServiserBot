@@ -34,6 +34,9 @@ function mergeIntent(previousIntent, rawIntent) {
 }
 
 export async function createValidatedIntent({ context, message, previousIntent }) {
-  const rawIntent = await generateReportIntent({ context, message, previousIntent })
-  return validateReportIntent(mergeIntent(previousIntent, rawIntent))
+  const selection = await generateReportIntent({ context, message, previousIntent })
+  return {
+    intent: validateReportIntent(mergeIntent(previousIntent, selection.intent)),
+    toolContext: selection.toolContext,
+  }
 }

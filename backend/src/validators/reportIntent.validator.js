@@ -2,9 +2,8 @@ import Joi from 'joi'
 import { env } from '../config/env.js'
 import { CHART_TYPES, GROUPINGS, METRICS, REPORT_TYPES } from '../services/reports/reportRegistry.js'
 import { DATA_LOOKUP_ENTITY_KEYS } from '../services/reports/dataLookupRegistry.js'
+import { WORKFORCE_TOOL_NAMES } from '../tools/workforce.tools.js'
 import { resolveDateRange } from '../utils/dateRange.js'
-
-const sqlRiskPattern = /(;|--|\/\*|\*\/)/i
 
 const filtersSchema = Joi.object({
   attendanceStatuses: Joi.array().items(Joi.string().max(40)).default([]),
@@ -25,9 +24,11 @@ const filtersSchema = Joi.object({
   siteCode: Joi.string().max(40).allow(null, '').optional(),
   siteId: Joi.number().integer().allow(null).optional(),
   statuses: Joi.array().items(Joi.string().max(40)).default([]),
+  statusIds: Joi.array().items(Joi.number().integer().valid(1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12)).default([]),
 }).default({})
 
 export const reportIntentSchema = Joi.object({
+  assumption: Joi.string().max(240).allow(null, '').default(null),
   chartTitle: Joi.string().max(140).allow(null, '').default(null),
   chartType: Joi.string().valid(...CHART_TYPES).default('bar'),
   clarificationQuestion: Joi.string().max(240).allow(null, '').default(null),
@@ -47,23 +48,17 @@ export const reportIntentSchema = Joi.object({
   reportType: Joi.string().valid(...Object.keys(REPORT_TYPES)).required(),
   requiresClarification: Joi.boolean().default(false),
   search: Joi.string().max(180).allow(null, '').default(null),
+  selectionConfidence: Joi.number().min(0).max(1).default(0),
   sort: Joi.object({
     direction: Joi.string().valid('asc', 'desc').default('desc'),
     field: Joi.string().max(80).default('shift_count'),
   }).default({ direction: 'desc', field: 'shift_count' }),
   understoodQuery: Joi.string().max(220).allow(null, '').default(null),
+  toolArguments: Joi.object().unknown(true).allow(null).default(null),
+  toolCallId: Joi.string().max(120).allow(null, '').default(null),
+  toolName: Joi.string().valid(...WORKFORCE_TOOL_NAMES).allow(null, '').default(null),
+  usedFallback: Joi.boolean().default(false),
 }).unknown(false)
-
-function assertNoSqlFragments(intent) {
-  const serialized = JSON.stringify(intent)
-
-  if (sqlRiskPattern.test(serialized)) {
-    const error = new Error('The reporting request contains unsupported instructions.')
-    error.status = 400
-    error.code = 'UNSAFE_INTENT'
-    throw error
-  }
-}
 
 function normalizeDateRange(dateRange) {
   if (!dateRange) {
@@ -90,8 +85,6 @@ function normalizeIntent(intent = {}) {
 
 export function validateReportIntent(intent) {
   const normalizedIntent = normalizeIntent(intent)
-
-  assertNoSqlFragments(normalizedIntent)
 
   if (normalizedIntent?.requiresClarification) {
     const clarificationQuestion = String(

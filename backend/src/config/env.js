@@ -14,8 +14,10 @@ export const env = {
   fieldServicerUsername: process.env.FIELDSERVICER_USERNAME ?? '',
   fieldServicerPassword: process.env.FIELDSERVICER_PASSWORD ?? '',
   fieldServicerForPortal: process.env.FIELDSERVICER_FOR_PORTAL !== 'false',
+  fieldServicerCacheTtlMs: toNumber(process.env.FIELDSERVICER_CACHE_TTL_MS, 30000),
   // AI Configuration
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
+  geminiFallbackModel: process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
   isProduction: process.env.NODE_ENV === 'production',
   maxReportDateRangeDays: toNumber(process.env.MAX_REPORT_DATE_RANGE_DAYS, 366),

@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import {
   Area,
   AreaChart,
@@ -48,7 +49,14 @@ function ChartTooltip({ active, formatByKey = {}, label, payload }) {
 }
 
 // ─── Custom Pie label ─────────────────────────────────────────────────────────
-function PieLabel({ cx, cy, innerRadius, midAngle, name, outerRadius, percent }) {
+function getContrastColor(color) {
+  const hex = String(color ?? '').replace('#', '')
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return '#fff'
+  const [red, green, blue] = [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16))
+  return red * 0.299 + green * 0.587 + blue * 0.114 > 170 ? '#201a2c' : '#fff'
+}
+
+function PieLabel({ cx, cy, innerRadius, midAngle, outerRadius, payload, percent }) {
   if (percent < 0.05) return null
   const RADIAN = Math.PI / 180
   const radius = innerRadius + (outerRadius - innerRadius) * 0.55
@@ -57,7 +65,7 @@ function PieLabel({ cx, cy, innerRadius, midAngle, name, outerRadius, percent })
   return (
     <text
       dominantBaseline="central"
-      fill="#fff"
+      fill={getContrastColor(payload?.color)}
       fontSize={11}
       fontWeight={600}
       textAnchor="middle"
@@ -95,13 +103,24 @@ function EmptyChart({ message = 'No chart data available.' }) {
 }
 
 // ─── Gradient defs helper ─────────────────────────────────────────────────────
-function GradientDefs({ series }) {
+function getSeriesColor(chart, seriesItem, index) {
+  return seriesItem.color ?? chart.colors?.[seriesItem.dataKey] ?? COLORS[index % COLORS.length]
+}
+
+function formatAxisLabel(value, chart) {
+  if (chart.xAxisKey === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    return new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(`${value}T00:00:00`))
+  }
+  return value
+}
+
+function GradientDefs({ chart, idPrefix, series }) {
   return (
     <defs>
       {series.map((s, i) => (
-        <linearGradient key={s.dataKey} id={`grad-${s.dataKey}`} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="5%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.18} />
-          <stop offset="95%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.01} />
+        <linearGradient key={s.dataKey} id={`${idPrefix}-${s.dataKey}`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="5%" stopColor={getSeriesColor(chart, s, i)} stopOpacity={0.3} />
+          <stop offset="95%" stopColor={getSeriesColor(chart, s, i)} stopOpacity={0.015} />
         </linearGradient>
       ))}
     </defs>
@@ -109,18 +128,19 @@ function GradientDefs({ series }) {
 }
 
 // ─── Chart type renderers ─────────────────────────────────────────────────────
-function LineChartRenderer({ chart, data, series }) {
+function LineChartRenderer({ chart, data, idPrefix, series }) {
   return (
     <LineChart data={data} margin={{ bottom: 28, left: 8, right: 18, top: 12 }}>
-      <GradientDefs series={series} />
+      <GradientDefs chart={chart} idPrefix={idPrefix} series={series} />
       <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
       <XAxis
         angle={-15}
         axisLine={false}
         dataKey={chart.xAxisKey}
         height={52}
-        interval={0}
+        interval="preserveStartEnd"
         tick={{ fill: 'var(--muted)', fontSize: 12 }}
+        tickFormatter={(value) => formatAxisLabel(value, chart)}
         textAnchor="end"
         tickLine={false}
       />
@@ -138,10 +158,10 @@ function LineChartRenderer({ chart, data, series }) {
           key={s.dataKey}
           activeDot={{ r: 5, strokeWidth: 0 }}
           dataKey={s.dataKey}
-          dot={{ fill: COLORS[i % COLORS.length], r: 3, strokeWidth: 0 }}
+          dot={data.length > 16 ? false : { fill: getSeriesColor(chart, s, i), r: 3, strokeWidth: 0 }}
           name={s.name}
-          stroke={COLORS[i % COLORS.length]}
-          strokeWidth={2.5}
+          stroke={getSeriesColor(chart, s, i)}
+          strokeWidth={2.75}
           type="monotone"
         />
       ))}
@@ -149,18 +169,19 @@ function LineChartRenderer({ chart, data, series }) {
   )
 }
 
-function AreaChartRenderer({ chart, data, series }) {
+function AreaChartRenderer({ chart, data, idPrefix, series }) {
   return (
     <AreaChart data={data} margin={{ bottom: 28, left: 8, right: 18, top: 12 }}>
-      <GradientDefs series={series} />
+      <GradientDefs chart={chart} idPrefix={idPrefix} series={series} />
       <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
       <XAxis
         angle={-15}
         axisLine={false}
         dataKey={chart.xAxisKey}
         height={52}
-        interval={0}
+        interval="preserveStartEnd"
         tick={{ fill: 'var(--muted)', fontSize: 12 }}
+        tickFormatter={(value) => formatAxisLabel(value, chart)}
         textAnchor="end"
         tickLine={false}
       />
@@ -178,11 +199,11 @@ function AreaChartRenderer({ chart, data, series }) {
           key={s.dataKey}
           activeDot={{ r: 5, strokeWidth: 0 }}
           dataKey={s.dataKey}
-          dot={{ fill: COLORS[i % COLORS.length], r: 3, strokeWidth: 0 }}
-          fill={`url(#grad-${s.dataKey})`}
+          dot={data.length > 16 ? false : { fill: getSeriesColor(chart, s, i), r: 3, strokeWidth: 0 }}
+          fill={`url(#${idPrefix}-${s.dataKey})`}
           name={s.name}
-          stroke={COLORS[i % COLORS.length]}
-          strokeWidth={2.5}
+          stroke={getSeriesColor(chart, s, i)}
+          strokeWidth={2.75}
           type="monotone"
         />
       ))}
@@ -194,6 +215,7 @@ function BarChartRenderer({ chart, data, series }) {
   const isVertical = chart.layout === 'vertical'
   return (
     <BarChart
+      barGap={3}
       data={data}
       layout={isVertical ? 'vertical' : 'horizontal'}
       margin={{
@@ -219,7 +241,7 @@ function BarChartRenderer({ chart, data, series }) {
             tick={{ fill: 'var(--muted)', fontSize: 12 }}
             tickLine={false}
             type="category"
-            width={100}
+            width={chart.yAxisWidth ?? 110}
           />
         </>
       ) : (
@@ -248,9 +270,9 @@ function BarChartRenderer({ chart, data, series }) {
       {series.map((s, i) => (
         <Bar
           key={s.dataKey}
-          barSize={series.length > 1 ? 14 : 22}
+          maxBarSize={series.length > 1 ? 13 : 22}
           dataKey={s.dataKey}
-          fill={COLORS[i % COLORS.length]}
+          fill={getSeriesColor(chart, s, i)}
           name={s.name}
           radius={isVertical ? [0, 6, 6, 0] : [6, 6, 0, 0]}
         />
@@ -266,22 +288,28 @@ function DonutChartRenderer({ chart, data, series }) {
       <Legend content={<ChartLegend />} verticalAlign="bottom" />
       <Pie
         cx="50%"
-        cy="45%"
+        cy="43%"
         data={data}
         dataKey={series[0].dataKey}
-        innerRadius="52%"
+        innerRadius="58%"
         labelLine={false}
         nameKey={chart.xAxisKey}
-        outerRadius="78%"
+        outerRadius="82%"
         label={<PieLabel />}
       >
         {data.map((entry, index) => (
           <Cell
             key={entry[chart.xAxisKey] ?? index}
-            fill={COLORS[index % COLORS.length]}
+            fill={entry.color ?? COLORS[index % COLORS.length]}
           />
         ))}
       </Pie>
+      {chart.centerValue !== undefined ? (
+        <>
+          <text className="donut-center-value" dominantBaseline="central" textAnchor="middle" x="50%" y="40%">{chart.centerValue}</text>
+          <text className="donut-center-label" dominantBaseline="central" textAnchor="middle" x="50%" y="47%">{chart.centerLabel ?? ''}</text>
+        </>
+      ) : null}
     </PieChart>
   )
 }
@@ -292,6 +320,7 @@ function DonutChartRenderer({ chart, data, series }) {
  *   - `preferArea`: render line charts as area charts (default true)
  */
 export default function DynamicChart({ chart, preferArea = true }) {
+  const chartId = useId().replaceAll(':', '')
   if (!chart) return null
 
   const data = chart.data ?? []
@@ -300,7 +329,7 @@ export default function DynamicChart({ chart, preferArea = true }) {
   const isEmpty = !data.length || !series.length
 
   return (
-    <section className="panel chart-card">
+    <section className={`panel chart-card ${chart.className ?? ''}`.trim()}>
       <header className="panel__header">
         <div>
           <p className="panel__eyebrow">{chart.type?.toUpperCase() ?? 'CHART'}</p>
@@ -315,13 +344,13 @@ export default function DynamicChart({ chart, preferArea = true }) {
         {isEmpty ? (
           <EmptyChart />
         ) : (
-          <ResponsiveContainer height={300} width="100%">
+          <ResponsiveContainer height={chart.height ?? 320} width="100%">
             {chart.type === 'pie' ? (
               <DonutChartRenderer chart={chart} data={data} series={series} />
             ) : chart.type === 'line' && preferArea ? (
-              <AreaChartRenderer chart={chart} data={data} series={series} />
+              <AreaChartRenderer chart={chart} data={data} idPrefix={`chart-${chartId}`} series={series} />
             ) : chart.type === 'line' ? (
-              <LineChartRenderer chart={chart} data={data} series={series} />
+              <LineChartRenderer chart={chart} data={data} idPrefix={`chart-${chartId}`} series={series} />
             ) : (
               <BarChartRenderer chart={chart} data={data} series={series} />
             )}

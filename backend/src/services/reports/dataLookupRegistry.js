@@ -9,6 +9,7 @@ const COMMON_FILTERS = [
   'site',
   'siteId',
   'statuses',
+  'statusIds',
 ]
 
 export const DATA_LOOKUP_ENTITIES = {
@@ -16,18 +17,24 @@ export const DATA_LOOKUP_ENTITIES = {
     columns: [
       'shift_date',
       'employee_name',
+      'status_id',
+      'raw_status',
       'attendance_status',
       'shift_status',
+      'scheduled_start',
+      'scheduled_end',
       'actual_hours',
-      'late_minutes',
     ],
     defaultColumns: [
       'shift_date',
       'employee_name',
+      'status_id',
+      'raw_status',
       'attendance_status',
       'shift_status',
+      'scheduled_start',
+      'scheduled_end',
       'actual_hours',
-      'late_minutes',
     ],
     filters: COMMON_FILTERS,
     label: 'Attendance Records',
@@ -41,6 +48,8 @@ export const DATA_LOOKUP_ENTITIES = {
   shifts: {
     columns: [
       'shift_date',
+      'status_id',
+      'raw_status',
       'shift_status',
       'employee_name',
       'customer_name',
@@ -50,6 +59,8 @@ export const DATA_LOOKUP_ENTITIES = {
     ],
     defaultColumns: [
       'shift_date',
+      'status_id',
+      'raw_status',
       'shift_status',
       'employee_name',
       'customer_name',

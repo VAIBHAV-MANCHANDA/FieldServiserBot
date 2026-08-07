@@ -18,22 +18,14 @@ const METRIC_ICONS = {
   cancelled_count: '🚫',
   completed_count: '✅',
   completion_rate: '📊',
-  early_leave_minutes: '🏃',
   employee_count: '👥',
   fill_rate: '📈',
-  gross_margin_percentage: '💹',
-  gross_profit: '💰',
-  late_count: '⚠️',
-  late_minutes: '🕐',
   missed_count: '❌',
-  overtime_hours: '🔆',
   record_count: '🗂️',
-  revenue: '💵',
   rostered_hours: '📅',
   shift_count: '📋',
   total_groups: '🗃️',
   unfilled_count: '⬜',
-  wages: '💳',
 }
 
 function getIcon(label) {

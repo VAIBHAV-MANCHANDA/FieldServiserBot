@@ -1,14 +1,14 @@
 import { generateResultSummary } from './gemini.service.js'
 
 // ─── Fallback insight generators (no AI needed) ───────────────────────────────
-function buildFallbackInsights({ appliedFilters, rows, summaryCards }) {
+export function buildFallbackInsights({ appliedFilters, assumption, rows, summaryCards }) {
   const hasDateRange = appliedFilters.fromDate && appliedFilters.toDate
   const dateStr = hasDateRange
     ? ` from ${appliedFilters.fromDate} to ${appliedFilters.toDate}`
     : ' over the selected period'
 
   if (!rows.length) {
-    const msg = `No data found${dateStr}.`
+    const msg = `${assumption ? `${assumption} ` : ''}No matching FieldServicer records were found${dateStr}. Try a broader date range or remove a name/status filter.`
     return { barInsight: msg, lineInsight: msg, overview: msg, pieInsight: msg }
   }
 
@@ -17,9 +17,10 @@ function buildFallbackInsights({ appliedFilters, rows, summaryCards }) {
   const xKey = Object.keys(topRow)[0]
   const topLabel = topRow[xKey] ?? 'the top entry'
 
-  const overview = firstCard
+  const overviewBase = firstCard
     ? `${firstCard.label} totals ${firstCard.value}${dateStr} across ${rows.length} group${rows.length !== 1 ? 's' : ''}.`
     : `Found ${rows.length} result${rows.length !== 1 ? 's' : ''}${dateStr}.`
+  const overview = assumption ? `${assumption} ${overviewBase}` : overviewBase
 
   const lineInsight = `The trend shows ${rows.length} data point${rows.length !== 1 ? 's' : ''}. ${firstCard ? `${firstCard.label} averages ${(firstCard.value / rows.length).toFixed(1)} per group.` : ''}`
 
@@ -31,9 +32,10 @@ function buildFallbackInsights({ appliedFilters, rows, summaryCards }) {
 }
 
 // ─── Main summarize function ──────────────────────────────────────────────────
-export async function summarizeReport({ appliedFilters, rows, summaryCards }) {
+export async function summarizeReport(payload) {
+  const { appliedFilters, rows, summaryCards } = payload
   // Try AI first — expects JSON back
-  const raw = await generateResultSummary({ appliedFilters, rows, summaryCards })
+  const raw = await generateResultSummary(payload)
 
   if (raw) {
     try {
@@ -48,18 +50,18 @@ export async function summarizeReport({ appliedFilters, rows, summaryCards }) {
       // Gemini returned plain string (old format) — wrap it
       if (typeof raw === 'string') {
         return {
-          ...buildFallbackInsights({ appliedFilters, rows, summaryCards }),
+          ...buildFallbackInsights(payload),
           overview: raw,
         }
       }
     } catch {
       // JSON parse failed — use raw as overview
       return {
-        ...buildFallbackInsights({ appliedFilters, rows, summaryCards }),
+        ...buildFallbackInsights(payload),
         overview: typeof raw === 'string' ? raw : undefined,
       }
     }
   }
 
-  return buildFallbackInsights({ appliedFilters, rows, summaryCards })
+  return buildFallbackInsights(payload)
 }

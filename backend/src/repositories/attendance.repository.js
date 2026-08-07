@@ -18,6 +18,11 @@ export async function listAttendance(limit = 100) {
     return raw.slice(0, limit)
   } catch (error) {
     logger.error('Failed to list attendance from FieldServicer API', error)
-    return []
+    const upstreamError = new Error('Unable to load live attendance data from FieldServicer.')
+    upstreamError.code = 'FIELDSERVICER_API_ERROR'
+    upstreamError.status = 502
+    upstreamError.expose = true
+    upstreamError.cause = error
+    throw upstreamError
   }
 }

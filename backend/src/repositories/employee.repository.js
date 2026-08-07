@@ -27,12 +27,9 @@ export async function listEmployees() {
       if (id && !seen.has(id)) {
         seen.set(id, {
           id,
-          employee_code: `EMP-${id}`,
           employee_name: s.EmployeeName ?? 'Unknown',
-          email: null,
           department: s.ShiftType ?? 'Work',
           position: s.ShiftType ?? 'Staff',
-          hourly_pay_rate: 0,
           is_active: 1,
         })
       }
@@ -41,7 +38,12 @@ export async function listEmployees() {
     return [...seen.values()].sort((a, b) => a.employee_name.localeCompare(b.employee_name))
   } catch (error) {
     logger.error('Failed to list employees from FieldServicer API', error)
-    return []
+    const upstreamError = new Error('Unable to load live employee data from FieldServicer.')
+    upstreamError.code = 'FIELDSERVICER_API_ERROR'
+    upstreamError.status = 502
+    upstreamError.expose = true
+    upstreamError.cause = error
+    throw upstreamError
   }
 }
 

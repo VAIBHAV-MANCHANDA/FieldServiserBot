@@ -66,7 +66,7 @@ export default function ChatBox({
               <p className="welcome-card__eyebrow">Ready when you are</p>
               <h3 className="welcome-card__title">Generate workforce insights in seconds.</h3>
               <p className="welcome-card__text">
-                Ask about shifts, late clock-ins, customer performance, missed visits, employee hours, or live attendance.
+                Ask naturally about shifts, employee comparisons, site coverage, hours, customers, or live attendance.
               </p>
             </div>
           </div>

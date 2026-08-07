@@ -13,6 +13,7 @@ FIELDSERVICER_API_URL=https://app.fieldservicer.com/api
 FIELDSERVICER_USERNAME=your-email@example.com
 FIELDSERVICER_PASSWORD=your-password
 FIELDSERVICER_FOR_PORTAL=true
+FIELDSERVICER_CACHE_TTL_MS=30000
 ```
 
 Never commit real credentials. Use environment-specific accounts and rotate credentials regularly.
@@ -28,6 +29,8 @@ The shared client in `backend/src/config/fieldservicer.js`:
 5. Re-authenticates and retries once when FieldServicer returns `401`.
 
 The browser does not need FieldServicer credentials to request analytics from the backend.
+
+Roster responses are cached in process memory for 30 seconds by default. Requests with the same location, client, and date range reuse cached data, while simultaneous identical requests share one upstream call. The dashboard refresh action can explicitly bypass this cache.
 
 ## Roster data
 
@@ -70,7 +73,23 @@ Frontend request
 
 ## Status normalization
 
-Roster statuses are mapped into analytics categories so reports have stable group names:
+`StatusID` is the authoritative source for roster status title and display colors:
+
+| StatusID | Title | Background | Text |
+| ---: | --- | --- | --- |
+| 1 | Unpublish | `#fff4b3` | Black |
+| 2 | Published | `#fffe42` | Black |
+| 3 | Clocked-In | `#23d06c` | Black |
+| 4 | Clocked-Out | `#697390` | Black |
+| 5 | Approved | `#9ccf7a` | Black |
+| 6 | Rejected | `#e42048` | Black |
+| 7 | Deleted | `#ffae42` | Black |
+| 9 | UnAssigned | `#ee82ee` | Black |
+| 10 | Submitted | `#697390` | Black |
+| 11 | Accepted | `#9ccf7a` | Black |
+| 12 | Clocked-Out | `#697390` | Black |
+
+The mapped status is then converted into analytics categories so reports have stable group names:
 
 - `Clocked-In`, `Clocked-Out`, `Approved`, `Accepted` -> `Completed`
 - `Submitted`, `Published`, `Pending` -> `Scheduled`
@@ -82,15 +101,15 @@ The raw status is retained alongside the normalized analytics status.
 
 ## Adding more endpoints
 
-Register new endpoints in `backend/src/services/api/apiRegistry.js`. For every endpoint:
+Add new authenticated request methods to `backend/src/config/fieldservicer.js`. For every endpoint:
 
 1. Confirm the HTTP method, path, parameters, and response shape.
-2. Add specific natural-language keywords.
-3. Add parameter extraction when required.
-4. Normalize the response into fields used by the report engine.
-5. Verify authentication failures, empty responses, malformed records, and date boundaries.
+2. Normalize only real response fields into the report engine.
+3. Declare a fixed Gemini function in `backend/src/tools/workforce.tools.js` with a precise description and restricted JSON schema.
+4. Map and validate that function in `backend/src/services/ai/workforceTool.service.js`.
+5. Verify authentication failures, empty responses, malformed arguments, typo-heavy questions, and date boundaries.
 
-See `HOW_TO_ADD_NEW_APIS.md` for the registry format and routing examples.
+See `HOW_TO_ADD_NEW_APIS.md` for the function-calling workflow.
 
 ## Health and troubleshooting
 
