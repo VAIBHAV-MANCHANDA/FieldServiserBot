@@ -1,12 +1,13 @@
-import { sendSuccess } from '../utils/response.js'
+import { login } from '../services/auth/auth.service.js'
+import { sendSuccess, sendError } from '../utils/response.js'
+import { logger } from '../utils/logger.js'
 
-export function postLogin(req, res) {
-  sendSuccess(res, {
-    token: 'development-session',
-    user: {
-      id: 'operator',
-      name: 'Field Operator',
-      role: 'admin',
-    },
-  }, 'Authenticated.')
+export async function postLogin(req, res) {
+  try {
+    const authData = await login()
+    sendSuccess(res, authData, 'Authenticated.')
+  } catch (error) {
+    logger.error('Login controller failed', error)
+    sendError(res, 'Authentication failed. Please check your credentials.', 401)
+  }
 }

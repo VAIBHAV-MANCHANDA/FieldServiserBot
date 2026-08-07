@@ -15,6 +15,12 @@ export const env = {
   dbPassword: process.env.DB_PASSWORD ?? '',
   dbPort: toNumber(process.env.DB_PORT, 3306),
   dbUser: process.env.DB_USER ?? 'root',
+  // FieldServicer API Configuration
+  fieldServicerApiUrl: process.env.FIELDSERVICER_API_URL ?? 'https://app.fieldservicer.com/api',
+  fieldServicerUsername: process.env.FIELDSERVICER_USERNAME ?? '',
+  fieldServicerPassword: process.env.FIELDSERVICER_PASSWORD ?? '',
+  fieldServicerForPortal: process.env.FIELDSERVICER_FOR_PORTAL === 'true',
+  // AI Configuration
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
   isProduction: process.env.NODE_ENV === 'production',
@@ -27,9 +33,10 @@ export const env = {
 export function validateEnv() {
   const missing = []
 
-  if (!env.dbHost) missing.push('DB_HOST')
-  if (!env.dbUser) missing.push('DB_USER')
-  if (!env.dbName) missing.push('DB_NAME')
+  // FieldServicer API is now primary - database is optional
+  if (!env.fieldServicerApiUrl) missing.push('FIELDSERVICER_API_URL')
+  if (!env.fieldServicerUsername) missing.push('FIELDSERVICER_USERNAME')
+  if (!env.fieldServicerPassword) missing.push('FIELDSERVICER_PASSWORD')
 
   if (missing.length > 0) {
     const error = new Error(`Missing required environment variables: ${missing.join(', ')}`)
@@ -39,5 +46,6 @@ export function validateEnv() {
 
   return {
     geminiConfigured: Boolean(env.geminiApiKey),
+    fieldServicerConfigured: Boolean(env.fieldServicerApiUrl && env.fieldServicerUsername && env.fieldServicerPassword),
   }
 }
