@@ -12,7 +12,7 @@ export default function ChatBox({
   onClear,
   onSend,
   suggestedQuestions = [],
-  subtitle = 'Ask workforce analytics questions and get live reports from MySQL.',
+  subtitle = 'Ask workforce analytics questions and get live reports from FieldServicer.',
   title = 'AI Workforce Analytics',
 }) {
   const [draft, setDraft] = useState('')

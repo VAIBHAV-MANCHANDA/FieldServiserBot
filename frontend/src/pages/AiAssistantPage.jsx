@@ -16,10 +16,10 @@ export default function AiAssistantPage() {
       <section className="page__hero">
         <div className="page__hero-icon" aria-hidden="true">AI</div>
         <div className="page__hero-copy">
-          <p className="page__eyebrow">Database-driven chatbot</p>
+          <p className="page__eyebrow">API-powered chatbot</p>
           <h2 className="page__headline">Ask smarter questions about your workforce.</h2>
           <p className="page__lede">
-            Questions are converted into validated report intents, run against approved MySQL reports, and displayed with charts, cards and tables.
+            Questions are converted into validated report intents, run against live FieldServicer API data, and displayed with charts, cards and tables.
           </p>
         </div>
       </section>

@@ -16,10 +16,10 @@ function normalizeError(error) {
     }
   }
 
-  if (error?.code === 'ER_ACCESS_DENIED_ERROR' || error?.code === 'ECONNREFUSED') {
+  if (error?.code === 'ECONNREFUSED') {
     return {
-      code: 'DATABASE_CONNECTION_FAILED',
-      message: 'Database connection failed.',
+      code: 'UPSTREAM_API_CONNECTION_FAILED',
+      message: 'FieldServicer API connection failed.',
       status: 503,
     }
   }

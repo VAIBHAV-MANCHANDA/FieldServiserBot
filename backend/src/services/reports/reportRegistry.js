@@ -127,7 +127,7 @@ export const REPORT_TYPES = {
     defaultEntity: 'employees',
     defaultGroupBy: 'employee',
     defaultMetrics: ['record_count'],
-    label: 'Database Lookup',
+    label: 'FieldServicer Data Lookup',
     method: 'getDataLookup',
     usesDateRange: false,
   },

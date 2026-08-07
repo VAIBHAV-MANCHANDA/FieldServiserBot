@@ -23,7 +23,7 @@ CRITICAL RULES — read carefully:
 Allowed reports:
 ${JSON.stringify(listReportTypes())}
 
-Database lookup entities (ONLY for raw record lookups, NOT for analytics):
+FieldServicer lookup entities (ONLY for raw record lookups, NOT for analytics):
 ${JSON.stringify(listDataLookupEntities())}
 
 Allowed output shape:
@@ -55,7 +55,7 @@ Allowed output shape:
   "understoodQuery": "Short plain-English query interpretation"
 }
 
-Use the previous intent only to resolve follow-up wording. Do not invent database identifiers.
+Use the previous intent only to resolve follow-up wording. Do not invent FieldServicer identifiers.
 Previous intent:
 ${JSON.stringify(previousIntent)}
 

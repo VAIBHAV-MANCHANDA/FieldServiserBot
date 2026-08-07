@@ -54,9 +54,9 @@ function detectOutOfScope(message) {
 
 const OUT_OF_SCOPE_RESPONSES = [
   "That's outside what I can help with. I'm built specifically for workforce analytics — ask me about shifts, attendance, employees, sites, revenue, or performance.",
-  "That question is out of my scope. I only have access to your workforce database. Try asking about shift counts, late clock-ins, employee hours, or financial summaries.",
-  "I can't help with that — I'm a workforce analytics assistant. I work with your live MySQL data on employees, shifts, attendance, customers, and sites.",
-  "Out of scope for me. I'm connected to your workforce operations database. Ask me something like 'show missed shifts this week' or 'which employee has the most overtime'.",
+  "That question is out of my scope. I only have access to your FieldServicer workforce data. Try asking about shift counts, employees, hours, or roster status.",
+  "I can't help with that — I'm a workforce analytics assistant. I work with live FieldServicer API data for employees, shifts, attendance, customers, and sites.",
+  "Out of scope for me. I'm connected to the FieldServicer API. Ask me something like 'show missed shifts this week' or 'which employee completed the most shifts'.",
 ]
 
 function getOutOfScopeMessage() {

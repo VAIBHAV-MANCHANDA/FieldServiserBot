@@ -60,7 +60,7 @@ function App() {
           </div>
           <div className="topbar__status">
             <span className="topbar__status-dot" aria-hidden="true" />
-            Live MySQL reports
+            Live FieldServicer data
           </div>
         </header>
 

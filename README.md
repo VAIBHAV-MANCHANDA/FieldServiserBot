@@ -1,63 +1,54 @@
-# AI Workforce Analytics C
+# FieldServicer Bot
 
-AI Workforce Analytics C is a JavaScript-only full-stack app for asking natural-language workforce analytics questions. React sends the question to Express, Gemini converts it into a structured reporting intent, Joi validates it, and the backend runs only approved parameterized MySQL reports.
+FieldServicer Bot is a JavaScript full-stack application for exploring live workforce data with natural-language questions. React sends questions to Express, Gemini converts them into structured report intents, Joi validates those intents, and the backend retrieves and aggregates real data from the FieldServicer API.
 
 ## Architecture
 
-React + Vite + Axios + Recharts runs in `frontend`. Node.js + Express + ES modules runs in `backend`. MySQL stores employees, customers, sites, shifts, attendance, chat sessions, chat messages, and AI query logs.
+- `frontend`: React, Vite, Axios, React Router, and Recharts.
+- `backend`: Node.js, Express, Gemini, Joi, and an authenticated FieldServicer API client.
+- `FieldServicer API`: the only workforce data source.
 
-Gemini never receives database credentials and never generates executable SQL. It only returns structured JSON intent. The backend owns validation, report selection, SQL, parameter binding, chart configuration, summary cards, error handling, and row/date limits.
+Gemini receives workforce questions and report context, but it never receives FieldServicer credentials. The backend owns authentication, intent validation, API access, normalization, filtering, aggregation, chart configuration, result limits, and error handling.
+
+Chat sessions are held in backend memory for the lifetime of the running process.
 
 ## Requirements
 
 - Node.js 20+
-- MySQL 8+
-- Gemini API key for chat queries
+- FieldServicer API credentials
+- Gemini API key for questions that cannot be resolved by deterministic intent rules
 
-## MySQL Setup
-
-Create the database and schema in this order:
-
-```bash
-mysql -u root -p < database/01-create-database.sql
-mysql -u root -p workforce_ai < database/02-create-tables.sql
-mysql -u root -p workforce_ai < database/03-create-indexes.sql
-mysql -u root -p workforce_ai < database/04-create-views.sql
-```
-
-The database name defaults to `workforce_ai` and can be changed with `DB_NAME`.
-
-## Backend Setup
+## Backend setup
 
 ```bash
 cd backend
 npm install
 copy .env.example .env
-npm run seed
 npm run dev
 ```
 
-Required backend environment variables:
+Configure `backend/.env`:
 
 ```env
 PORT=5000
 NODE_ENV=development
 CLIENT_URL=http://localhost:5173
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=
-DB_NAME=workforce_ai
-DB_CONNECTION_LIMIT=10
+
+FIELDSERVICER_API_URL=https://app.fieldservicer.com/api
+FIELDSERVICER_USERNAME=your-email@example.com
+FIELDSERVICER_PASSWORD=your-password
+FIELDSERVICER_FOR_PORTAL=true
+
 GEMINI_API_KEY=
-GEMINI_MODEL=gemini-1.5-flash
+GEMINI_MODEL=gemini-3.5-flash
+
 MAX_REPORT_DATE_RANGE_DAYS=366
 MAX_REPORT_ROWS=100
 ```
 
-Get a Gemini API key from Google AI Studio, then place it only in `backend/.env` as `GEMINI_API_KEY`. Do not put it in `frontend/.env`.
+Keep credentials only in `backend/.env`; never expose them through frontend environment variables or commit them.
 
-## Frontend Setup
+## Frontend setup
 
 ```bash
 cd frontend
@@ -66,64 +57,65 @@ copy .env.example .env
 npm run dev
 ```
 
-Frontend environment:
+Configure `frontend/.env`:
 
 ```env
 VITE_API_BASE_URL=http://localhost:5000/api
 ```
 
-## Seed Data
-
-Run:
-
-```bash
-cd backend
-npm run seed
-```
-
-The seed script is idempotent and generates approximately 25 employees, 6 customers, 12 sites, 1,500 shifts, and 1,300+ attendance records over the last six months.
-
-## API Endpoints
+## Application endpoints
 
 - `GET /api/health`
-- `GET /api/health/database`
+- `GET /api/health/fieldservicer`
+- `POST /api/auth/login`
 - `POST /api/chat/query`
+- `GET /api/chat/history`
 - `GET /api/chat/sessions`
 - `GET /api/chat/sessions/:sessionId`
 - `DELETE /api/chat/sessions/:sessionId`
 - `GET /api/reports/types`
 - `POST /api/reports/generate`
 
-## Example Questions
+## FieldServicer endpoints currently used
+
+- `POST /Auth/Login`
+- `GET /Shift/RosterShiftList`
+
+The roster endpoint accepts `LocationID`, `ClientID`, `FromDate`, and `ToDate`. Its response is normalized into a stable internal shift shape before reports are calculated.
+
+## Query workflow
+
+1. The frontend posts a workforce question to `/api/chat/query`.
+2. The backend rejects unrelated questions and loads recent conversation context.
+3. Deterministic rules or Gemini produce a structured report intent.
+4. Joi validates the report type, metrics, grouping, filters, dates, sorting, chart type, and row limit.
+5. The backend requests live records from FieldServicer.
+6. Records are normalized, filtered, grouped, and aggregated in memory.
+7. The response includes summary cards, line/pie/bar charts, a table, and a concise explanation.
+
+## Example questions
 
 - Show completed and missed shifts this month.
 - Create a graph of actual hours by employee.
-- Which employees were late most frequently?
-- Show revenue, wages and gross profit by month.
 - Which site has the most missed shifts?
 - Show currently clocked-in employees.
 - Compare rostered and actual hours.
 - Show the shift-status distribution as a pie chart.
 
-Follow-ups:
+Follow-ups can reuse the previous intent:
 
 - Group this by week.
 - Compare it with last month.
 - Show the top five only.
 - Convert this into a line graph.
 
-## Security Design
+## Adding FieldServicer endpoints
 
-- Gemini only returns structured JSON intent.
-- Joi validates report type, metrics, grouping, filters, sort, chart type, and limits.
-- SQL lives in repositories and uses placeholders.
-- AI-generated raw SQL is never executed.
-- Chat attempts are logged without credentials.
-- The Gemini key stays in backend `.env`.
+Add endpoint metadata to `backend/src/services/api/apiRegistry.js`, including its method, path, parameters, keywords, and authentication requirement. Add or update normalization and report logic when the endpoint returns a new data shape. See `HOW_TO_ADD_NEW_APIS.md` for examples.
 
 ## Troubleshooting
 
-- If `GET /api/health/database` fails, confirm MySQL is running and `backend/.env` credentials match.
-- If `POST /api/chat/query` returns `GEMINI_NOT_CONFIGURED`, add `GEMINI_API_KEY`.
-- If seeding fails, rerun the SQL migration files in order and then run `npm run seed`.
-- If the frontend cannot reach the API, confirm `VITE_API_BASE_URL=http://localhost:5000/api`.
+- If `/api/health/fieldservicer` fails, verify the FieldServicer URL, credentials, portal flag, and network access.
+- If a chat request returns `GEMINI_NOT_CONFIGURED`, add `GEMINI_API_KEY` or use a question supported by deterministic intent rules.
+- If the frontend cannot reach the backend, confirm `VITE_API_BASE_URL=http://localhost:5000/api`.
+- Check backend logs for authentication, routing, normalization, and upstream API errors.

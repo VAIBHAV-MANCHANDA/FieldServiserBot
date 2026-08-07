@@ -316,7 +316,7 @@ function createDataLookupIntent(message) {
   }
 
   return {
-    chartTitle: 'Database Lookup',
+    chartTitle: 'FieldServicer Data Lookup',
     chartType: 'bar',
     columns: inferLookupColumns(entity, text),
     dateRange,

@@ -9,17 +9,11 @@ const toNumber = (value, fallback) => {
 
 export const env = {
   clientUrl: process.env.CLIENT_URL ?? 'http://localhost:5173',
-  dbConnectionLimit: toNumber(process.env.DB_CONNECTION_LIMIT, 10),
-  dbHost: process.env.DB_HOST ?? 'localhost',
-  dbName: process.env.DB_NAME ?? 'workforce_ai',
-  dbPassword: process.env.DB_PASSWORD ?? '',
-  dbPort: toNumber(process.env.DB_PORT, 3306),
-  dbUser: process.env.DB_USER ?? 'root',
   // FieldServicer API Configuration
   fieldServicerApiUrl: process.env.FIELDSERVICER_API_URL ?? 'https://app.fieldservicer.com/api',
   fieldServicerUsername: process.env.FIELDSERVICER_USERNAME ?? '',
   fieldServicerPassword: process.env.FIELDSERVICER_PASSWORD ?? '',
-  fieldServicerForPortal: process.env.FIELDSERVICER_FOR_PORTAL === 'true',
+  fieldServicerForPortal: process.env.FIELDSERVICER_FOR_PORTAL !== 'false',
   // AI Configuration
   geminiApiKey: process.env.GEMINI_API_KEY ?? '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
@@ -33,7 +27,6 @@ export const env = {
 export function validateEnv() {
   const missing = []
 
-  // FieldServicer API is now primary - database is optional
   if (!env.fieldServicerApiUrl) missing.push('FIELDSERVICER_API_URL')
   if (!env.fieldServicerUsername) missing.push('FIELDSERVICER_USERNAME')
   if (!env.fieldServicerPassword) missing.push('FIELDSERVICER_PASSWORD')

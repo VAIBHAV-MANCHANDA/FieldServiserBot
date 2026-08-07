@@ -27,7 +27,7 @@ export default function ChatHistoryPage() {
           <div>
             <p className="panel__eyebrow">Sessions</p>
             <h2 className="panel__title">Chat history</h2>
-            <p className="panel__subtitle">Saved database-backed conversations.</p>
+            <p className="panel__subtitle">Conversations from the current server session.</p>
           </div>
         </header>
 

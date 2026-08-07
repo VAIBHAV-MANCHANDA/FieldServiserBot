@@ -117,18 +117,22 @@ class FieldServicerClient {
 
   /**
    * Get roster/shift list
+   * Returns a flat array of shift objects.
    */
   async getRosterShiftList({ locationId = 0, clientId = 0, fromDate, toDate }) {
     try {
-      const params = new URLSearchParams({
-        LocationID: locationId,
-        ClientID: clientId,
-        FromDate: fromDate,
-        ToDate: toDate,
+      const response = await this.client.get('/Shift/RosterShiftList', {
+        params: {
+          LocationID: locationId,
+          ClientID: clientId,
+          FromDate: fromDate,
+          ToDate: toDate,
+        },
       })
 
-      const response = await this.client.get(`/Shift/RosterShiftList?${params}`)
-      return response.data
+      // API returns a plain array directly
+      const data = response.data
+      return Array.isArray(data) ? data : data?.Data ?? data?.Items ?? data?.Result ?? []
     } catch (error) {
       logger.error('Failed to fetch roster shift list', {
         error: error.message,

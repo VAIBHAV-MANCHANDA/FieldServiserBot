@@ -2,162 +2,101 @@
 
 ## Overview
 
-The application now connects to the real **FieldServicer API** instead of using local seed data. All employee, shift, and roster data is fetched from the live API.
+FieldServicer is the application's only workforce data source. The backend authenticates with FieldServicer, retrieves live records, normalizes external response fields, and calculates analytics in memory.
 
 ## Configuration
 
-### Environment Variables
-
-Update your `backend/.env` file with FieldServicer credentials:
+Set these values in `backend/.env`:
 
 ```env
-# FieldServicer API Configuration
 FIELDSERVICER_API_URL=https://app.fieldservicer.com/api
 FIELDSERVICER_USERNAME=your-email@example.com
 FIELDSERVICER_PASSWORD=your-password
 FIELDSERVICER_FOR_PORTAL=true
 ```
 
-### Example Configuration
+Never commit real credentials. Use environment-specific accounts and rotate credentials regularly.
 
-```env
-FIELDSERVICER_API_URL=https://app.fieldservicer.com/api
-FIELDSERVICER_USERNAME=bhupindersehjal9@outlook.com
-FIELDSERVICER_PASSWORD=y34nf9
-FIELDSERVICER_FOR_PORTAL=true
+## Authentication
+
+The shared client in `backend/src/config/fieldservicer.js`:
+
+1. Calls `POST /Auth/Login` with server-side credentials.
+2. Holds access and refresh tokens in process memory.
+3. reads the access-token expiry and renews it with a one-minute buffer.
+4. Adds `Authorization: Bearer <token>` to authenticated requests.
+5. Re-authenticates and retries once when FieldServicer returns `401`.
+
+The browser does not need FieldServicer credentials to request analytics from the backend.
+
+## Roster data
+
+The confirmed roster endpoint is:
+
+```text
+GET /Shift/RosterShiftList
 ```
 
-## Features
+Supported parameters:
 
-### 1. **Automatic JWT Authentication**
-- Automatically logs in to FieldServicer API on startup
-- Handles JWT token refresh automatically
-- Retries failed requests with refreshed tokens
+- `LocationID`: location filter; `0` means all available locations.
+- `ClientID`: client filter; `0` means all available clients.
+- `FromDate`: inclusive start date in `YYYY-MM-DD` format.
+- `ToDate`: inclusive end date in `YYYY-MM-DD` format.
 
-### 2. **Available API Endpoints**
-
-#### Auth
-- `POST /Auth/Login` - Login with credentials
-
-#### Shifts/Roster
-- `GET /Shift/RosterShiftList` - Get roster shifts with filters:
-  - `LocationID` - Filter by location (0 for all)
-  - `ClientID` - Filter by client (0 for all)
-  - `FromDate` - Start date (YYYY-MM-DD)
-  - `ToDate` - End date (YYYY-MM-DD)
-
-## Architecture
-
-### New Files
-
-1. **`src/config/fieldservicer.js`**
-   - FieldServicer API client with axios
-   - Automatic authentication and token refresh
-   - Request/response interceptors
-
-2. **Updated Files**
-   - `src/config/env.js` - Added FieldServicer configuration
-   - `src/services/auth/auth.service.js` - Uses real API login
-   - `src/repositories/shift.repository.js` - Fetches from API instead of database
-
-### Token Management
+Example backend usage:
 
 ```javascript
-// Token is automatically managed
 const shifts = await fieldServicerClient.getRosterShiftList({
   locationId: 0,
   clientId: 0,
   fromDate: '2026-08-01',
-  toDate: '2026-08-31'
+  toDate: '2026-08-31',
 })
 ```
 
-### Status Data
+## Data flow
 
-From the API response, shifts include status information:
-- StatusID: Numeric ID (1-12)
-- Title: Status name (Unpublish, Published, Clocked-In, etc.)
-- BgColor: Hex color for background (#fff4b3, #fae42, etc.)
-- TxtColor: Text color (Black)
-
-## Usage
-
-### Start the Backend
-
-```bash
-cd backend
-npm install
-npm run dev
+```text
+Frontend request
+  -> Express controller
+  -> validated report intent
+  -> FieldServicer client
+  -> live API response
+  -> response normalization
+  -> filtering and aggregation
+  -> cards, charts, table, and summary
 ```
 
-### Login Flow
+## Status normalization
 
-1. Frontend calls `/api/auth/login`
-2. Backend authenticates with FieldServicer API
-3. Returns JWT token to frontend
-4. Frontend includes token in subsequent requests
+Roster statuses are mapped into analytics categories so reports have stable group names:
 
-### Fetch Roster Data
+- `Clocked-In`, `Clocked-Out`, `Approved`, `Accepted` -> `Completed`
+- `Submitted`, `Published`, `Pending` -> `Scheduled`
+- `Unpublish`, `UnAssigned` -> `Unfilled`
+- `Rejected` -> `Missed`
+- `Deleted` -> `Cancelled`
 
-```javascript
-// In your repositories or services
-import { fieldServicerClient } from '../config/fieldservicer.js'
+The raw status is retained alongside the normalized analytics status.
 
-// Get shifts for August 2026
-const shifts = await fieldServicerClient.getRosterShiftList({
-  locationId: 0,
-  clientId: 0,
-  fromDate: '2026-08-01',
-  toDate: '2026-08-31'
-})
-```
+## Adding more endpoints
 
-## Migration Notes
+Register new endpoints in `backend/src/services/api/apiRegistry.js`. For every endpoint:
 
-### Removed Dependencies
-- Seed data scripts are no longer needed
-- Database is now optional (can be used for caching if needed)
+1. Confirm the HTTP method, path, parameters, and response shape.
+2. Add specific natural-language keywords.
+3. Add parameter extraction when required.
+4. Normalize the response into fields used by the report engine.
+5. Verify authentication failures, empty responses, malformed records, and date boundaries.
 
-### What Changed
-- ✅ Auth service now calls real API
-- ✅ Shift repository fetches from API
-- ✅ Automatic token refresh
-- ✅ JWT authentication
-- ⏳ Employee repository (TODO: needs API endpoint)
-- ⏳ Attendance repository (TODO: needs API endpoint)
+See `HOW_TO_ADD_NEW_APIS.md` for the registry format and routing examples.
 
-## Next Steps
+## Health and troubleshooting
 
-1. **Add more API endpoints** as you discover them:
-   - Employees list
-   - Attendance/clock-in/out
-   - Reports
-   - Locations
-   - Clients
+Use `GET /api/health/fieldservicer` to verify authentication and connectivity.
 
-2. **Update other repositories** to use FieldServicer API
-
-3. **Optional: Add caching layer** using database for performance
-
-## Troubleshooting
-
-### Authentication Fails
-- Check credentials in `.env`
-- Verify `FIELDSERVICER_FOR_PORTAL=true`
-- Check API URL is correct
-
-### Token Expired
-- Token automatically refreshes before expiry
-- If issues persist, check token expiry parsing in `fieldservicer.js`
-
-### API Errors
-- Check logs for detailed error messages
-- Verify endpoint URLs match FieldServicer API documentation
-- Check network connectivity
-
-## Security Notes
-
-- **Never commit `.env` file** with real credentials
-- Use `.env.example` as template
-- Rotate credentials regularly
-- Use environment-specific credentials for dev/staging/prod
+- Authentication failure: verify credentials and `FIELDSERVICER_FOR_PORTAL`.
+- Repeated `401`: inspect access-token parsing and the login response shape.
+- Empty roster: verify location, client, and date-range parameters.
+- Unexpected analytics: compare the live response fields with the normalization logic in `report.repository.js`.
